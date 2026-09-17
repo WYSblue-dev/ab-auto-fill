@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv
+.env
+
+# Contact records and machine-specific queue history do not belong in Git.
+/pending_person.json
+/senders_pdfs/*
+!/senders_pdfs/.gitkeep
