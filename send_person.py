@@ -1,3 +1,14 @@
+"""
+Use the information gathered from the captured pdf_downloads and record_que
+to be able to correctly add individuals to the actionbuilder api.
+
+I believe checking their ids may be the correct route to avoid any conflicts
+with creating duplicate file so maybe we make the check for them that way prior
+to any creation of a member.
+
+The lookup is now implemented in action_builder_lookup.py and runs before POST.
+"""
+
 from __future__ import annotations
 
 # for the purpose of command line args
@@ -17,9 +28,18 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
-from record_queue import DEFAULT_QUEUE, STATE_NAME, QueueError, RecordQueue
+from action_builder_lookup import ActionBuilderConfig, ActionBuilderLookup, LookupResult
+from record_queue import (
+    DEFAULT_QUEUE,
+    RECORD_FOLDERS,
+    STATE_NAME,
+    QueueError,
+    RecordQueue,
+)
 
 
+# Retained as an annotated learning example. Runtime configuration now comes
+# from ActionBuilderConfig, shared by the GET lookup and POST submission.
 # checks environment variables and grabs them with os.environ.get()
 def require_environment_variable(name: str) -> str:
     """The function that is used for the purpose of capturing a .env file
@@ -223,45 +243,25 @@ def build_actionbuilder_payload(record: dict[str, Any]) -> dict[str, Any]:
 
 # The api call to actionbuilder that actually sends the data over the
 # api provided
-def submit_to_actionbuilder(payload: dict[str, Any]) -> dict[str, Any]:
+def submit_to_actionbuilder(
+    payload: dict[str, Any], *, config: ActionBuilderConfig | None = None,
+) -> dict[str, Any]:
     """This takes in the payload(the formed payload from the approved person)
     to then submit that data provided the .env exist with the correct
     credentials and the connection allows the sending of the data.
     Gives us a json file of the response that was returned from the api."""
-    # Load plain-text .env settings into os.environ. This does not encrypt them.
-    load_dotenv()
-    # function to grab value from the .env
-    api_key = require_environment_variable("ACTION_BUILDER_API_KEY")
-    # function to grab value from the .env
-    subdomain = require_environment_variable("ACTION_BUILDER_SUBDOMAIN")
-    # function to grab value from the .env
-    campaign_id = require_environment_variable("ACTION_BUILDER_CAMPAIGN_ID")
-
-    # build the url based on the values we have obtained
-    url = (
-        # What is seen prefixed before .acitonbuilder in the brower bar.
-        f"https://{subdomain}.actionbuilder.org"
-        f"/api/rest/v1/campaigns/"
-        # The campaign_id is what is needed for the purpose of creation in
-        # the correct area. Our campaign_id can be found.... on the web app.
-        f"{campaign_id}/people"
-    )
-    # These are the headers that the api inself needs. Will need this for the
-    # request like expected of what is to be returned.
-    headers = {
-        # key needed for connection.
-        "OSDI-API-Token": api_key,
-        # hal+json expected post.
-        "Accept": "application/hal+json",
-    }
+    # The sending workflow passes the same validated settings used for GET.
+    # This prevents checking one campaign and then creating in another.
+    if config is None:
+        config = ActionBuilderConfig.from_environment()
 
     # Physical POST(creation) request sent to the web api with the data we have
     # formed. The .post of the json data we are creating.
     response = requests.post(
         # url to point to api creation.
-        url,
+        config.people_url,
         # passing the headers that need specified.
-        headers=headers,
+        headers=config.headers,
         # pass the dictionary of json data(build_actionbuilder_payload)
         # JSON-encodes it to what the api is expecting. Think UTF-8
         json=payload,
@@ -319,10 +319,23 @@ def show_success(result: dict[str, Any]) -> None:
     if not isinstance(person, dict):
         return
     identifiers = person.get("identifiers", [])
-    if isinstance(identifiers, list) and identifiers and isinstance(identifiers[0], str):
+    if (
+        isinstance(identifiers, list)
+        and identifiers
+        and isinstance(identifiers[0], str)
+    ):
         print(f"Identifier: {identifiers[0]}")
     if isinstance(person.get("browser_url"), str):
         print(f"Action Builder record: {person['browser_url']}")
+
+
+def show_lookup_result(result: LookupResult) -> None:
+    """Show IDs and differing field names, without dumping remote contact data."""
+    print(f"Action Builder lookup: {result.reason}")
+    for candidate in result.candidates:
+        print("Candidate identifier(s): " + ", ".join(candidate["identifiers"]))
+        if candidate["differing_fields"]:
+            print("Fields to review: " + ", ".join(candidate["differing_fields"]))
 
 
 def queue_for_input(input_file: Path, configured_queue: Path) -> Path | None:
@@ -338,67 +351,145 @@ def queue_for_input(input_file: Path, configured_queue: Path) -> Path | None:
             return directory
     # A missing history file must not turn a generated record into a legacy file.
     if re.fullmatch(r"person-[0-9a-f]{64}\.json", resolved.name):
+        # Status subfolders belong to the same queue and share its root history.
+        if resolved.parent.name in RECORD_FOLDERS:
+            return resolved.parent.parent
         return resolved.parent
     return None
 
 
-def send_queue(directory: Path, input_file: Path | None, submit: bool) -> int:
+def send_queue(directory: Path, input_file: Path | None, submit: bool,
+               *, check_only: bool = False) -> int:
     """Preview or send only tracked pending records, with one queue lock held."""
     with RecordQueue(directory) as queue:
-        labels = {"pending": "ready", "review": "need review", "deferred": "waiting for download",
-                  "sending": "send in progress", "sent": "already sent", "uncertain": "need Action Builder check"}
+        labels = {
+            "pending": "ready",
+            "review": "need review",
+            "deferred": "waiting for download",
+            "sending": "send in progress",
+            "sent": "already sent",
+            "uncertain": "need Action Builder check",
+        }
         counts = queue.status_counts()
         if counts:
-            print("Download groups: " + "; ".join(f"{count} {labels[status]}" for status, count in sorted(counts.items())))
-        items = [queue.item_for_path(input_file)] if input_file is not None else queue.pending_records()
+            print(
+                "Download groups: "
+                + "; ".join(
+                    f"{count} {labels[status]}"
+                    for status, count in sorted(counts.items())
+                )
+            )
+        items = (
+            [queue.item_for_path(input_file)]
+            if input_file is not None
+            else queue.pending_records()
+        )
         if not items:
-            print("No pending records. Any waiting or review groups listed above still need attention.")
+            print(
+                "No pending records. Any waiting or review groups listed above still need attention."
+            )
             return 0
 
         # Validate the whole selected batch before the first network request.
-        prepared = [(item, build_actionbuilder_payload(load_approved_person(item.path))) for item in items]
-        if not submit:
+        prepared = [
+            (item, build_actionbuilder_payload(load_approved_person(item.path)))
+            for item in items
+        ]
+        if not submit and not check_only:
             print("Preview only. No API request was made.")
             for item, payload in prepared:
-                print(f"\nPending record: {item.path.name}")
+                print(f"\nPending record: {item.path.relative_to(queue.directory)}")
                 print(json.dumps(payload, indent=4, ensure_ascii=False))
             return 0
 
-        # Missing setup values should not consume a record's one send attempt.
-        load_dotenv()
-        for name in ("ACTION_BUILDER_API_KEY", "ACTION_BUILDER_SUBDOMAIN", "ACTION_BUILDER_CAMPAIGN_ID"):
-            require_environment_variable(name)
-        for number, (item, payload) in enumerate(prepared):
-            if number:
-                time.sleep(0.3)  # Space queued POSTs apart to avoid a rapid burst.
+        # A GET checks for matches without consuming a record's send attempt.
+        # Reuse one client so its request pacing applies throughout this batch.
+        config = ActionBuilderConfig.from_environment()
+        lookup_client = ActionBuilderLookup(config)
+        checked = held = sent = 0
+        previous_post = False
+        for item, payload in prepared:
+            # A prior lookup can hold related versions in this prepared batch.
+            # Re-read eligibility rather than trusting the original list.
+            if item.id not in {current.id for current in queue.pending_records()}:
+                print(f"Related record held for review: {item.path.name}")
+                held += 1
+                continue
+            if previous_post:
+                time.sleep(0.3)  # The GET client cannot see the preceding POST.
+                previous_post = False
+            result = lookup_client.check(payload)
+            queue.record_lookup(item, result.as_history(config))
+            checked += 1
+            print(f"Checked record: {item.path.name}")
+            show_lookup_result(result)
+            if result.outcome != "not_found":
+                held += 1
+                print("Moved to review. No person was created or updated.")
+                continue
+            if check_only:
+                # A clean check stays pending. Submission will check again.
+                continue
+            # The lookup client spaces its GETs; leave a gap before the POST too.
+            time.sleep(0.3)
             queue.begin_send(item)  # Save 'sending' before the POST starts.
             try:
-                result = submit_to_actionbuilder(payload)
+                result = submit_to_actionbuilder(payload, config=config)
                 queue.finish_send(item, result)
             except BaseException:
                 # Even a timeout may mean the server created the person already.
                 # A keyboard interruption or local save failure is also uncertain.
                 try:
-                    queue.mark_uncertain(item, "The sending attempt did not finish reliably. Check Action Builder before retrying.")
+                    queue.mark_uncertain(
+                        item,
+                        "The sending attempt did not finish reliably. Check Action Builder before retrying.",
+                    )
                 except (OSError, QueueError):
                     # A persisted 'sending' claim also blocks later automatic retries.
                     pass
-                print("Sending stopped. This record needs review in Action Builder; it will not be retried automatically.", file=sys.stderr)
+                print(
+                    "Sending stopped. This record needs review in Action Builder; it will not be retried automatically.",
+                    file=sys.stderr,
+                )
                 raise
             show_success(result)
-        print(f"Finished sending {len(prepared)} pending record(s).")
-        return 0
+            sent += 1
+            previous_post = True
+        print(f"Checked {checked} record(s); {held} record(s) held for review.")
+        if check_only:
+            print("GET checks only. No people were created or updated. Clear records remain pending.")
+        else:
+            print(f"Successfully submitted {sent} record(s). Sent records are in: {queue.directory / 'sent'}")
+        return 1 if held else 0
+
+
+def check_queue(directory: Path, input_file: Path | None = None) -> int:
+    """Check pending records with GET only, saving matches in the review folder."""
+    return send_queue(directory, input_file, submit=False, check_only=True)
 
 
 def main() -> int:
     """With no file argument, use the extractor's local pool of approved JSON."""
-    parser = argparse.ArgumentParser(description="Preview or send approved Action Builder records.")
-    parser.add_argument("input_file", nargs="?", type=Path,
-                        help="Optional single JSON file; otherwise use the pending queue.")
-    parser.add_argument("--queue-dir", type=Path, default=DEFAULT_QUEUE,
-                        help="Approved-record pool; defaults to senders_pdfs beside this script.")
-    parser.add_argument("--submit", action="store_true",
-                        help="Actually send records. Without this option, only preview them.")
+    parser = argparse.ArgumentParser(
+        description="Preview or send approved Action Builder records."
+    )
+    parser.add_argument(
+        "input_file",
+        nargs="?",
+        type=Path,
+        help="Optional single JSON file; otherwise use the pending queue.",
+    )
+    parser.add_argument(
+        "--queue-dir",
+        type=Path,
+        default=DEFAULT_QUEUE,
+        help="Queue root containing pending/sent/review; defaults to composed_info.",
+    )
+    parser.add_argument(
+        "--submit",
+        action="store_true",
+        help="Actually send records. Without this option, only preview them.",
+    )
     arguments = parser.parse_args()
     try:
         if arguments.input_file is None:
@@ -408,19 +499,43 @@ def main() -> int:
             return send_queue(managed_queue, arguments.input_file, arguments.submit)
 
         # Keep the original explicit-file workflow for older, unmanaged JSONs.
-        payload = build_actionbuilder_payload(load_approved_person(arguments.input_file))
+        payload = build_actionbuilder_payload(
+            load_approved_person(arguments.input_file)
+        )
         if not arguments.submit:
             print("Preview only. No API request was made.")
             print(json.dumps(payload, indent=4, ensure_ascii=False))
             return 0
-        show_success(submit_to_actionbuilder(payload))
+        # An older standalone JSON must pass the same fresh lookup gate.
+        config = ActionBuilderConfig.from_environment()
+        result = ActionBuilderLookup(config).check(payload)
+        show_lookup_result(result)
+        if result.outcome != "not_found":
+            print("Possible existing person. Review Action Builder; nothing was created or updated.")
+            return 1
+        time.sleep(0.3)
+        show_success(submit_to_actionbuilder(payload, config=config))
         return 0
     except KeyboardInterrupt:
-        print("Sending was interrupted. Check the last attempt in Action Builder before retrying.", file=sys.stderr)
+        print(
+            "Sending was interrupted. Check the last attempt in Action Builder before retrying.",
+            file=sys.stderr,
+        )
         return 130
-    except (QueueError, OSError, ValueError, TypeError, RuntimeError, requests.RequestException) as error:
+    except (
+        QueueError,
+        OSError,
+        ValueError,
+        TypeError,
+        RuntimeError,
+        requests.RequestException,
+    ) as error:
         # Network exceptions may contain server details; keep the user message short.
-        message = str(error) if isinstance(error, (QueueError, ValueError, TypeError, RuntimeError)) else "Check the files, connection settings, and internet connection."
+        message = (
+            str(error)
+            if isinstance(error, (QueueError, ValueError, TypeError, RuntimeError))
+            else "Check the files, connection settings, and internet connection."
+        )
         print(f"Sending stopped: {message}", file=sys.stderr)
         return 1
 

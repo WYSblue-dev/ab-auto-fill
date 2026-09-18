@@ -18,9 +18,14 @@ import tempfile
 from typing import Any
 
 
-DEFAULT_QUEUE = Path(__file__).resolve().parent / "senders_pdfs"
+DEFAULT_QUEUE = Path(__file__).resolve().parent / "composed_info"
+LEGACY_QUEUE = Path(__file__).resolve().parent / "senders_pdfs"
 STATE_NAME = ".queue-state.json"
 LOCK_NAME = ".queue.lock"
+# Folders make progress visible. The history, not the folder, decides status.
+RECORD_FOLDERS = ("pending", "sent", "review")
+STATUS_FOLDERS = {"pending": "pending", "sent": "sent", "review": "review",
+                  "sending": "review", "uncertain": "review"}
 CONTACT_FIELDS = {
     "given_name", "family_name", "additional_name", "email", "phone",
     "address_line_1", "locality", "region", "postal_code",
@@ -45,6 +50,24 @@ class QueueItem:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _has_queue_data(directory: Path) -> bool:
+    """Empty tracked folders are harmless; an older history must not be ignored."""
+    waiting = [directory]
+    while waiting:
+        path = waiting.pop()
+        if path.is_symlink():
+            return True
+        if path.is_dir():
+            waiting.extend(path.iterdir())
+        elif path.is_file():
+            if path.name == ".DS_Store" or (path.name == ".gitkeep" and path.stat().st_size == 0):
+                continue
+            return True
+        elif path.exists():
+            return True
+    return False
 
 
 def _record_bytes(record: dict[str, Any]) -> bytes:
@@ -86,6 +109,14 @@ class RecordQueue:
             raise QueueError("This queue is already open.")
         if self.directory.is_symlink():
             raise QueueError("Choose a real queue folder, not a symbolic link.")
+        for parent in self.directory.resolve().parents:
+            marker = parent / STATE_NAME
+            if marker.exists() or marker.is_symlink():
+                raise QueueError("Choose the queue's main folder, not one of its pending, sent, or review subfolders.")
+        if self.directory.resolve() == DEFAULT_QUEUE.resolve():
+            if (LEGACY_QUEUE.exists() or LEGACY_QUEUE.is_symlink()) and _has_queue_data(LEGACY_QUEUE):
+                raise QueueError("An older senders_pdfs queue exists. Move the whole folder to composed_info, "
+                                 "or use --queue-dir senders_pdfs, so its sending history is preserved.")
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.directory = self.directory.resolve()
         lock = self.directory / LOCK_NAME
@@ -108,16 +139,21 @@ class RecordQueue:
             if state_path.exists() or state_path.is_symlink():
                 self._state = _load_json(state_path)
             else:
-                self._state = {"version": 1, "families": {}, "records": {}}
-            self._validate()
+                self._state = {"version": 2, "families": {}, "records": {}}
+            # Validate every file before migration or recovery moves anything.
+            self._validate(reconcile=False)
+            migrated = self._state["version"] == 1
+            self._state["version"] = 2
             # A crash after a claim may have happened after the server accepted it.
             recovered = False
             for entry in self._state["records"].values():
                 if entry["status"] == "sending":
                     entry.update(status="uncertain", reason="A previous sending run did not finish.", updated_at=_now())
                     recovered = True
-            if recovered or not state_path.exists():
+            if migrated or recovered or not state_path.exists():
                 self._commit()
+            else:
+                self._reconcile_records()
             return self
         except BaseException:
             self.__exit__(None, None, None)
@@ -139,16 +175,51 @@ class RecordQueue:
             raise QueueError("Open RecordQueue with a 'with' statement before using it.")
         return self._state
 
-    def _path(self, identifier: str) -> Path:
+    def _filename(self, identifier: str) -> str:
         # Never trust a stored path: only this computed filename is permitted.
-        if not ID_PATTERN.fullmatch(identifier):
+        if not isinstance(identifier, str) or not ID_PATTERN.fullmatch(identifier):
             raise QueueError("The queue history contains an invalid record ID.")
-        return self.directory / f"person-{identifier}.json"
+        return f"person-{identifier}.json"
+
+    def _possible_paths(self, identifier: str) -> tuple[Path, ...]:
+        filename = self._filename(identifier)
+        # The flat path is included only to recover an old or interrupted move.
+        return (self.directory / filename,
+                *(self.directory / folder / filename for folder in RECORD_FOLDERS))
+
+    def _path(self, identifier: str, status: str | None = None) -> Path:
+        filename = self._filename(identifier)
+        if status is None:
+            entry = self._require_open()["records"].get(identifier)
+            if entry is None:
+                raise QueueError("The queue history refers to an unknown contact record.")
+            status = entry["status"]
+        if status not in STATUS_FOLDERS:
+            raise QueueError("The queue history contains an invalid status.")
+        return self.directory / STATUS_FOLDERS[status] / filename
+
+    @staticmethod
+    def _sync_directory(directory: Path) -> None:
+        # Saving a file and saving its directory entry are separate on POSIX.
+        if os.name == "posix":
+            descriptor = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+
+    def _ensure_folders(self) -> None:
+        for name in RECORD_FOLDERS:
+            path = self.directory / name
+            if path.is_symlink() or (path.exists() and not path.is_dir()):
+                raise QueueError("A queue status folder is not a real directory. Review the queue.")
+            path.mkdir(exist_ok=True, mode=0o700)
+        self._sync_directory(self.directory)
 
     def _write_json(self, path: Path, value: Any) -> None:
         temporary_path = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.directory,
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
                                              prefix=".queue-", suffix=".tmp", delete=False) as stream:
                 temporary_path = Path(stream.name)
                 json.dump(value, stream, ensure_ascii=False, indent=2, sort_keys=True)
@@ -157,42 +228,35 @@ class RecordQueue:
                 os.fsync(stream.fileno())
             os.replace(temporary_path, path)
             # Make the renamed history durable before a POST can start.
-            if os.name == "posix":
-                descriptor = os.open(self.directory, os.O_RDONLY)
-                try:
-                    os.fsync(descriptor)
-                finally:
-                    os.close(descriptor)
+            self._sync_directory(path.parent)
         finally:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
 
     def _commit(self) -> None:
+        # Check first, save the status second, and move the file last.
+        # A stopped rename can then be recovered using the saved status.
+        self._validate(reconcile=False)
         self._write_json(self.directory / STATE_NAME, self._require_open())
+        self._reconcile_records()
 
-    def _validate(self) -> None:
+    def _validate(self, *, reconcile: bool = True) -> None:
         state = self._require_open()
-        if not isinstance(state, dict) or set(state) != {"version", "families", "records"} or state["version"] != 1:
+        if not isinstance(state, dict) or set(state) != {"version", "families", "records"} or type(state["version"]) is not int or state["version"] not in {1, 2}:
             raise QueueError("The queue history format is unsupported or damaged.")
         families, records = state["families"], state["records"]
         if not isinstance(families, dict) or not isinstance(records, dict):
             raise QueueError("The queue history is damaged.")
-        expected_files = {STATE_NAME}
         for identifier, entry in records.items():
-            path = self._path(identifier)
-            expected_files.add(path.name)
+            self._filename(identifier)
             if not isinstance(entry, dict) or not isinstance(entry.get("status"), str) or entry["status"] not in STATUSES:
                 raise QueueError("A queue record has an invalid status.")
-            if set(entry) - {"status", "created_at", "updated_at", "reason", "result"}:
+            if set(entry) - {"status", "created_at", "updated_at", "reason", "result", "lookup"}:
                 raise QueueError("A queue record contains unexpected history fields.")
             if any(not isinstance(entry.get(key), str) for key in ("created_at", "updated_at")):
                 raise QueueError("A queue record is missing its history.")
-            try:
-                digest = hashlib.sha256(_record_bytes(_load_json(path))).hexdigest()
-            except (TypeError, ValueError) as error:
-                raise QueueError("A queued record was edited or is damaged. Re-extract it through the finder.") from error
-            if digest != identifier:
-                raise QueueError("A queued record was edited. Re-extract it through the finder; do not send it.")
+            if "lookup" in entry:
+                self._validate_lookup(entry["lookup"])
         referenced = set()
         for family, entry in families.items():
             if not isinstance(family, str) or not family or not isinstance(entry, dict):
@@ -213,14 +277,74 @@ class RecordQueue:
             referenced.update(entry["record_ids"])
         if referenced != set(records):
             raise QueueError("The queue contains an untracked contact record.")
-        for path in self.directory.iterdir():
-            if path.is_dir() or path.is_symlink():
-                raise QueueError("The queue contains an unexpected folder or symbolic link. Review it first.")
-            if path.suffix.casefold() == ".json" and path.name not in expected_files:
-                raise QueueError("The queue contains an unknown JSON file. Use the extractor to add records.")
         for identifier, entry in records.items():
             if entry["status"] == "pending" and not self._eligible(identifier):
                 raise QueueError("The queue history marks a held record as pending. Review its history.")
+        locations = self._scan_records()
+        if reconcile:
+            self._reconcile_records(locations)
+
+    def _scan_records(self) -> dict[str, Path]:
+        """Find one intact copy of every tracked record, without trusting folders."""
+        records = self._require_open()["records"]
+        names = {self._filename(identifier): identifier for identifier in records}
+        locations: dict[str, Path] = {}
+        folders = [self.directory]
+        for folder in folders:
+            for path in folder.iterdir():
+                if path.is_symlink():
+                    raise QueueError("The queue contains a symbolic link. Review it before continuing.")
+                if path.is_dir():
+                    if folder == self.directory and path.name in RECORD_FOLDERS:
+                        folders.append(path)
+                        continue
+                    raise QueueError("The queue contains an unexpected subfolder. Review it before continuing.")
+                if not path.is_file():
+                    raise QueueError("The queue contains an unsupported filesystem entry.")
+                if folder == self.directory and path.name in {STATE_NAME, LOCK_NAME}:
+                    continue
+                # Finder creates this harmless metadata file when viewing folders.
+                if path.name == ".DS_Store":
+                    continue
+                # Git needs an empty placeholder to include an otherwise empty folder.
+                if path.name == ".gitkeep" and path.stat().st_size == 0:
+                    continue
+                # An interrupted atomic write can leave our private temp file.
+                if re.fullmatch(r"\.queue-[A-Za-z0-9_-]+\.tmp", path.name):
+                    continue
+                identifier = names.get(path.name)
+                if identifier is None:
+                    raise QueueError("The queue contains an unknown file. Use the extractor to add records.")
+                if identifier in locations:
+                    raise QueueError("The queue contains duplicate copies of a record. Review them before continuing.")
+                try:
+                    digest = hashlib.sha256(_record_bytes(_load_json(path))).hexdigest()
+                except (TypeError, ValueError) as error:
+                    raise QueueError("A queued record was edited or is damaged. Re-extract it through the finder.") from error
+                if digest != identifier:
+                    raise QueueError("A queued record was edited. Re-extract it through the finder; do not send it.")
+                locations[identifier] = path
+        if set(locations) != set(records):
+            raise QueueError("A tracked contact record is missing. Restore it before continuing.")
+        return locations
+
+    def _move_record(self, source: Path, destination: Path) -> None:
+        """Rename one checked file; never replace another copy."""
+        if destination.exists() or destination.is_symlink():
+            raise QueueError("A record already exists at the destination. Review duplicate copies.")
+        os.replace(source, destination)
+        self._sync_directory(source.parent)
+        self._sync_directory(destination.parent)
+
+    def _reconcile_records(self, locations: dict[str, Path] | None = None) -> None:
+        """Finish interrupted moves using history, never using the folder as status."""
+        if locations is None:
+            locations = self._scan_records()
+        self._ensure_folders()
+        for identifier, source in sorted(locations.items()):
+            destination = self._path(identifier)
+            if source != destination:
+                self._move_record(source, destination)
 
     @staticmethod
     def _source_details(family: str, hashes: set[str], names: list[str]) -> None:
@@ -246,11 +370,84 @@ class RecordQueue:
         records = self._require_open()["records"]
         return any(records[identifier]["status"] in ATTEMPTED for identifier in family["record_ids"])
 
+    @staticmethod
+    def _validate_lookup(lookup: Any) -> None:
+        """Keep a small, understandable receipt for the read-only API check."""
+        if not isinstance(lookup, dict) or set(lookup) != {
+            "outcome", "reason", "candidates", "destination", "checked_at",
+        }:
+            raise QueueError("A record's Action Builder lookup history is damaged.")
+        if not isinstance(lookup["outcome"], str) or lookup["outcome"] not in {"not_found", "existing", "needs_review"}:
+            raise QueueError("A record has an invalid Action Builder lookup outcome.")
+        if any(not isinstance(lookup[key], str) or not lookup[key].strip()
+               for key in ("reason", "checked_at")):
+            raise QueueError("An Action Builder lookup is missing its explanation or date.")
+        destination = lookup["destination"]
+        if (not isinstance(destination, dict) or set(destination) != {"subdomain", "campaign_id"}
+                or any(not isinstance(value, str) or not value.strip() for value in destination.values())):
+            raise QueueError("An Action Builder lookup is missing its destination.")
+        candidates = lookup["candidates"]
+        if not isinstance(candidates, list):
+            raise QueueError("An Action Builder lookup has invalid matching records.")
+        for candidate in candidates:
+            if not isinstance(candidate, dict) or set(candidate) != {
+                "identifiers", "matching_fields", "differing_fields",
+            }:
+                raise QueueError("An Action Builder lookup has an invalid matching record.")
+            for values in candidate.values():
+                if (not isinstance(values, list)
+                        or any(not isinstance(value, str) or not value.strip() for value in values)):
+                    raise QueueError("An Action Builder lookup has invalid matching details.")
+            if not candidate["identifiers"]:
+                raise QueueError("An Action Builder match is missing its identifier.")
+        if lookup["outcome"] == "not_found" and candidates:
+            raise QueueError("A lookup cannot report no match while containing matching people.")
+        if lookup["outcome"] != "not_found" and not candidates:
+            raise QueueError("An existing-person lookup is missing its matching people.")
+        if lookup["outcome"] == "existing" and (
+            len(candidates) != 1 or candidates[0]["differing_fields"]
+        ):
+            raise QueueError("An exact existing-person lookup has conflicting matching details.")
+
+    def _lookup_held(self, family: dict[str, Any]) -> bool:
+        """PDF resolution cannot clear a possible existing-person match.
+
+        Identical records can connect several filename groups. Follow those
+        connections so choosing a different filename or version cannot bypass
+        a hold. A new GET check is required before any future POST; a saved
+        'not_found' receipt is never permanent permission to create someone.
+        """
+        state = self._require_open()
+        related_ids = set(family["record_ids"])
+        unchecked = list(state["families"].values())
+        changed = True
+        while changed:
+            changed = False
+            remaining = []
+            for related_family in unchecked:
+                if related_ids.intersection(related_family["record_ids"]):
+                    related_ids.update(related_family["record_ids"])
+                    changed = True
+                else:
+                    remaining.append(related_family)
+            unchecked = remaining
+        return any(state["records"][identifier].get("lookup", {}).get("outcome")
+                   in {"existing", "needs_review"} for identifier in related_ids)
+
     def _eligible(self, identifier: str) -> bool:
         # Shared identical contact records are sent once, even under two filenames.
         owners = [entry for entry in self._require_open()["families"].values()
                   if entry["current_id"] == identifier]
-        return bool(owners) and all(not entry["review"] and not entry["deferred"] and not self._attempted(entry) for entry in owners)
+        return bool(owners) and all(not entry["review"] and not entry["deferred"]
+                                   and not self._attempted(entry) and not self._lookup_held(entry)
+                                   for entry in owners)
+
+    def _hold_lookup_families(self, reason: str) -> None:
+        """Apply a remote match hold to every connected filename group."""
+        for family in self._require_open()["families"].values():
+            if self._lookup_held(family):
+                self._revoke(family)
+                family.update(review=True, deferred=False, reason=reason[:500])
 
     def _revoke(self, family: dict[str, Any]) -> None:
         for identifier in family["record_ids"]:
@@ -318,7 +515,9 @@ class RecordQueue:
         if not already_exists:
             # An interruption before the history commit leaves an unknown file;
             # the next run stops for review instead of guessing its status.
-            self._write_json(self._path(digest), record)
+            if any(path.exists() or path.is_symlink() for path in self._possible_paths(digest)):
+                raise QueueError("An untracked copy of this record already exists. Review the queue.")
+            self._write_json(self._path(digest, "review"), record)
             records[digest] = {"status": "review", "created_at": _now(), "updated_at": _now()}
         if digest not in entry["record_ids"]:
             entry["record_ids"].append(digest)
@@ -326,7 +525,13 @@ class RecordQueue:
 
         # Once any version was attempted, resolving a changed file cannot create
         # another person. An operator must reconcile it with Action Builder.
-        if (changed or entry["review"]) and attempted:
+        if self._lookup_held(entry):
+            # This new version may connect two previously separate groups.
+            self._hold_lookup_families("A related record may already exist in Action Builder. Review its lookup history.")
+            entry.update(current_id=digest, review=True,
+                         reason="A related record may already exist in Action Builder. Review its lookup history.")
+            outcome = "review"
+        elif (changed or entry["review"]) and attempted:
             self._revoke(entry)
             entry.update(current_id=digest, review=True, reason="A related record was already sent or attempted. Check Action Builder.")
             outcome = "review"
@@ -368,25 +573,46 @@ class RecordQueue:
         """Explicitly naming a queue file must not bypass its sending history."""
         candidate = Path(path).resolve()
         for item in self.pending_records():
-            if item.path == candidate:
+            # Opening an older queue may have just moved its flat file.
+            if candidate in self._possible_paths(item.id):
                 return item
         raise QueueError("This queue file is not pending. It may be held, already sent, or unknown.")
 
     def _entry_for(self, item: QueueItem) -> dict[str, Any]:
-        if not isinstance(item, QueueItem) or item.path != self._path(item.id):
+        # An issued item's pending path becomes stale after begin_send moves it.
+        # Accept its original controlled path; still require the same tracked ID.
+        if not isinstance(item, QueueItem) or item.path not in self._possible_paths(item.id):
             raise QueueError("The sender selected an invalid queue item.")
         entry = self._require_open()["records"].get(item.id)
         if entry is None:
             raise QueueError("The sender selected an unknown queue item.")
+        family = self._require_open()["families"].get(item.family)
+        if family is None or item.id not in family["record_ids"]:
+            raise QueueError("The sender selected an item from the wrong filename group.")
         return entry
 
     def begin_send(self, item: QueueItem) -> None:
-        """Persist the claim before the first network request can occur."""
+        """Persist the claim before POST; earlier GET checks do not claim a send."""
         self._validate()
         entry = self._entry_for(item)
         if entry["status"] != "pending" or not self._eligible(item.id):
             raise QueueError("This record is no longer pending. Nothing was sent.")
         entry.update(status="sending", updated_at=_now())
+        self._commit()
+
+    def record_lookup(self, item: QueueItem, lookup: dict[str, Any]) -> None:
+        """Save a GET result, holding possible matches without claiming a POST."""
+        self._validate()
+        self._validate_lookup(lookup)
+        entry = self._entry_for(item)
+        if entry["status"] != "pending" or not self._eligible(item.id):
+            raise QueueError("This record is no longer pending. Its lookup was not saved.")
+        # Copy the receipt so later caller changes cannot alter queue history.
+        entry.update(lookup=json.loads(json.dumps(lookup)), updated_at=_now())
+        if lookup["outcome"] != "not_found":
+            # Keep every connected version on hold, including filename aliases.
+            self._hold_lookup_families(lookup["reason"])
+            entry.update(status="review", reason=lookup["reason"][:500])
         self._commit()
 
     def finish_send(self, item: QueueItem, result: dict) -> None:

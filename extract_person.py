@@ -619,7 +619,7 @@ def main() -> int:
     parser.add_argument("--downloads-dir", type=Path, default=DEFAULT_DOWNLOADS,
                         help="Folder to scan; defaults to this user's Downloads.")
     parser.add_argument("--queue-dir", type=Path, default=DEFAULT_QUEUE,
-                        help="Folder for approved JSON records and local processing history.")
+                        help="Queue root containing pending/sent/review; defaults to composed_info.")
     parser.add_argument("--marker", default=DEFAULT_MARKER,
                         help="Literal filename ending before .pdf, ignoring numbered copies.")
     parser.add_argument("--min-age-seconds", type=float, default=2.0,
@@ -659,7 +659,8 @@ def main() -> int:
             print(message)
         print(f"Queued: {summary.queued}; already handled: {summary.unchanged}; "
               f"needs review: {summary.review}; waiting for downloads: {summary.deferred}.")
-        print(f"Queue: {arguments.queue_dir.resolve()}. Nothing was sent.")
+        print(f"Composed information: {arguments.queue_dir.resolve()}.")
+        print("Ready records are in pending; held records are in review. Nothing was sent.")
         return 1 if summary.review or summary.deferred or summary.errors else 0
     except (ValueError, QueueError, OSError, PdfReadError) as error:
         # Field errors explain what needs review without dumping personal data.

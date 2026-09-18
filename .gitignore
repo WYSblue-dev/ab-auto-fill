@@ -6,4 +6,12 @@ __pycache__/
 # Contact records and machine-specific queue history do not belong in Git.
 /pending_person.json
 /senders_pdfs/*
-!/senders_pdfs/.gitkeep
+
+# Keep the folder layout in Git, but never contact records or queue history.
+/composed_info/**
+!/composed_info/pending/
+!/composed_info/sent/
+!/composed_info/review/
+!/composed_info/pending/.gitkeep
+!/composed_info/sent/.gitkeep
+!/composed_info/review/.gitkeep

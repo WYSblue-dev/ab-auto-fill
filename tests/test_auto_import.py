@@ -32,7 +32,7 @@ class AutomaticImportTests(unittest.TestCase):
         self.folder = Path(self.temporary.name)
         self.downloads = self.folder / "Downloads"
         self.downloads.mkdir()
-        self.queue_dir = self.folder / "senders_pdfs"
+        self.queue_dir = self.folder / "composed_info"
 
     def write_download(self, name, *, replace=None, omit=(), extra_page=False, age=60):
         # Reuse the real synthetic template rather than mocking successful parsing.
@@ -75,6 +75,9 @@ class AutomaticImportTests(unittest.TestCase):
         first = self.import_downloads()
         self.assertEqual((first.queued, first.review, first.deferred), (1, 0, 0))
         self.assertEqual(self.queued_records(), [EXPECTED])
+        with RecordQueue(self.queue_dir) as queue:
+            self.assertEqual(queue.pending_records()[0].path.parent,
+                             (self.queue_dir / "pending").resolve())
         second = self.import_downloads()
         self.assertEqual((second.queued, second.unchanged), (0, 1))
         self.assertEqual(self.queued_records(), [EXPECTED])

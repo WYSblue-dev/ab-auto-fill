@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import patch
 
 from record_queue import QueueError, RecordQueue
+from action_builder_lookup import ActionBuilderConfig, LookupResult
 import send_person
 import test_extract_person as fixture
 
@@ -22,13 +23,15 @@ import test_extract_person as fixture
 RECORD = fixture.EXPECTED
 OTHER_RECORD = {**RECORD, "given_name": "Taylor", "email": "taylor@example.test"}
 SUCCESS = {"person": {"identifiers": ["invented:person-id"]}}
+CONFIG = ActionBuilderConfig("invented-token", "invented", "invented-campaign")
+CLEAR = LookupResult("not_found", "No matching people found in this campaign.")
 
 
 class RecordQueueTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.queue_dir = Path(self.temporary.name) / "queue"
+        self.queue_dir = Path(self.temporary.name) / "composed_info"
 
     @staticmethod
     def enqueue(queue, record=None, *, family="morgan-organized", source="source-one", resolve=False):
@@ -156,7 +159,7 @@ class QueuedSenderTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.folder = Path(self.temporary.name)
-        self.queue_dir = self.folder / "queue"
+        self.queue_dir = self.folder / "composed_info"
 
     def seed_queue(self, records):
         with RecordQueue(self.queue_dir) as queue:
@@ -165,20 +168,28 @@ class QueuedSenderTests(unittest.TestCase):
                               {f"source-{number}"}, [f"person-{number}.pdf"])
             return list(queue.pending_records())
 
-    def run_sender(self, *arguments, submit_effect=None, credential_error=None, sleep_effect=None):
+    def run_sender(self, *arguments, submit_effect=None, credential_error=None,
+                   sleep_effect=None, queue_override=True, lookup_effect=None):
         output = io.StringIO()
         errors = io.StringIO()
-        argv = ["send_person.py", *map(str, arguments), "--queue-dir", str(self.queue_dir)]
+        argv = ["send_person.py", *map(str, arguments)]
+        if queue_override:
+            argv.extend(["--queue-dir", str(self.queue_dir)])
         # Mock credentials as well as transport so the real .env is not read.
         with patch("sys.argv", argv), patch.object(send_person, "load_dotenv"), \
-                patch.object(send_person, "require_environment_variable", return_value="invented",
+                patch.object(send_person, "DEFAULT_QUEUE", self.folder / "isolated-default"), \
+                patch.object(send_person.ActionBuilderConfig, "from_environment", return_value=CONFIG,
                              side_effect=credential_error), \
+                patch.object(send_person.requests, "get", side_effect=AssertionError("Real HTTP is forbidden in tests")), \
                 patch.object(send_person.requests, "post", side_effect=AssertionError("Real HTTP is forbidden in tests")), \
+                patch.object(send_person.ActionBuilderLookup, "check", side_effect=lookup_effect,
+                             return_value=CLEAR) as lookup, \
                 patch.object(send_person, "submit_to_actionbuilder", side_effect=submit_effect,
                              return_value=SUCCESS) as submit, \
                 patch.object(send_person.time, "sleep", side_effect=sleep_effect), \
                 redirect_stdout(output), redirect_stderr(errors):
             result = send_person.main()
+        self.last_lookup = lookup
         return result, submit, output.getvalue(), errors.getvalue()
 
     def test_default_mode_previews_without_submitting(self):
@@ -209,7 +220,7 @@ class QueuedSenderTests(unittest.TestCase):
             original_begin_send(queue, item)
             events.append("claimed")
 
-        def post(payload):
+        def post(payload, *, config):
             self.assertEqual(events[-1], "claimed")
             events.append("posted")
             return SUCCESS
@@ -220,14 +231,14 @@ class QueuedSenderTests(unittest.TestCase):
         self.assertEqual(submit.call_count, 2)
         self.assertEqual(events, ["claimed", "posted", "claimed", "posted"])
 
-    def test_batch_pauses_between_posts_but_not_before_first_or_during_preview(self):
+    def test_posts_are_spaced_from_get_requests_and_preview_never_sleeps(self):
         self.seed_queue([RECORD, OTHER_RECORD])
         events = []
 
         def pause(seconds):
             events.append(("sleep", seconds))
 
-        def post(payload):
+        def post(payload, *, config):
             events.append(("post",))
             return SUCCESS
 
@@ -239,7 +250,8 @@ class QueuedSenderTests(unittest.TestCase):
         status, submit, _, errors = self.run_sender("--submit", submit_effect=post, sleep_effect=pause)
         self.assertEqual(status, 0, errors)
         self.assertEqual(submit.call_count, 2)
-        self.assertEqual(events, [("post",), ("sleep", 0.3), ("post",)])
+        self.assertEqual(events, [("sleep", 0.3), ("post",), ("sleep", 0.3),
+                                  ("sleep", 0.3), ("post",)])
 
     def test_submission_failure_stops_batch_and_blocks_that_record(self):
         self.seed_queue([RECORD, OTHER_RECORD])
@@ -289,9 +301,47 @@ class QueuedSenderTests(unittest.TestCase):
     def test_explicit_managed_path_cannot_resend_sent_record(self):
         items = self.seed_queue([RECORD])
         self.assertEqual(self.run_sender("--submit")[0], 0)
-        status, submit, _, _ = self.run_sender(items[0].path, "--submit")
+        sent_path = self.queue_dir / "sent" / items[0].path.name
+        self.assertTrue(sent_path.is_file())
+        for path in (items[0].path, sent_path):
+            with self.subTest(path=path.parent.name):
+                status, submit, _, _ = self.run_sender(path, "--submit", queue_override=False)
+                self.assertNotEqual(status, 0)
+                submit.assert_not_called()
+
+    def test_manually_moving_sent_file_to_pending_cannot_resend(self):
+        item = self.seed_queue([RECORD])[0]
+        self.assertEqual(self.run_sender("--submit")[0], 0)
+        sent_path = self.queue_dir / "sent" / item.path.name
+        sent_path.rename(item.path)
+        status, submit, _, errors = self.run_sender("--submit")
+        self.assertEqual(status, 0, errors)
+        submit.assert_not_called()
+        self.assertTrue(sent_path.is_file())
+        self.assertFalse(item.path.exists())
+
+    def test_managed_pending_child_cannot_be_used_as_queue_root(self):
+        self.seed_queue([RECORD])
+        root = self.queue_dir
+        self.queue_dir = root / "pending"
+        status, submit, _, _ = self.run_sender("--submit")
         self.assertNotEqual(status, 0)
         submit.assert_not_called()
+        with RecordQueue(root) as queue:
+            self.assertEqual(len(queue.pending_records()), 1)
+
+    def test_generated_file_with_missing_history_never_becomes_legacy_submission(self):
+        for folder in ("pending", "sent", "review", "root"):
+            with self.subTest(folder=folder):
+                self.queue_dir = self.folder / f"missing-history-{folder}"
+                item = self.seed_queue([RECORD])[0]
+                target = (self.queue_dir if folder == "root" else self.queue_dir / folder) / item.path.name
+                if target.resolve() != item.path:
+                    item.path.rename(target)
+                (self.queue_dir / ".queue-state.json").unlink()
+                status, submit, _, _ = self.run_sender(target, "--submit", queue_override=False)
+                self.assertNotEqual(status, 0)
+                submit.assert_not_called()
 
     def test_legacy_explicit_json_still_previews(self):
         path = self.folder / "legacy.json"
