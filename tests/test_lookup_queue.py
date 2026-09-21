@@ -3,7 +3,7 @@
 These tests never read real credentials, use the real queue, or contact an API.
 """
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 from pathlib import Path
@@ -19,6 +19,7 @@ import test_send_queue as sender_fixture
 
 RECORD = sender_fixture.RECORD
 CONFIG = sender_fixture.CONFIG
+# Both supported searches completed without finding a candidate.
 CLEAR = sender_fixture.CLEAR
 IDENTIFIER = "action_builder:11111111-1111-4111-8111-111111111111"
 EXISTING = LookupResult("existing", "This person appears to exist already.", ({
@@ -41,12 +42,12 @@ class LookupQueueTests(unittest.TestCase):
 
     def run_check(self, result=CLEAR):
         # Guard both HTTP verbs even though the lookup itself is mocked.
-        with patch.object(send_person.ActionBuilderConfig, "from_environment", return_value=CONFIG), \
-                patch.object(send_person.ActionBuilderLookup, "check", return_value=result) as lookup, \
-                patch.object(send_person.requests, "get", side_effect=AssertionError("No real GET allowed")), \
-                patch.object(send_person.requests, "post", side_effect=AssertionError("No real POST allowed")), \
-                patch.object(send_person, "submit_to_actionbuilder") as submit, \
-                redirect_stdout(io.StringIO()):
+        with (patch.object(send_person.ActionBuilderConfig, "from_environment", return_value=CONFIG),
+                patch.object(send_person.ActionBuilderLookup, "check", return_value=result) as lookup,
+                patch.object(send_person.requests, "get", side_effect=AssertionError("No real GET allowed")),
+                patch.object(send_person.requests, "post", side_effect=AssertionError("No real POST allowed")),
+                patch.object(send_person, "submit_to_actionbuilder") as submit,
+                redirect_stdout(io.StringIO())):
             status = send_person.check_queue(self.queue_dir)
         submit.assert_not_called()
         return status, lookup
@@ -58,7 +59,7 @@ class LookupQueueTests(unittest.TestCase):
         self.last_lookup.assert_not_called()
         submit.assert_not_called()
 
-    def test_get_only_no_match_stays_pending_and_is_checked_again_before_post(self):
+    def test_clearance_stays_pending_but_is_checked_again_before_post(self):
         item = self.seed_queue([RECORD])[0]
         status, lookup = self.run_check()
         self.assertEqual(status, 0)
@@ -215,62 +216,188 @@ class LookupQueueTests(unittest.TestCase):
             with self.assertRaises(QueueError):
                 queue.record_lookup(item, CLEAR.as_history(CONFIG))
 
+    def run_real_precheck(self, *, remote=None, check_only=False, standalone=None,
+                          allow_submit=False, phone_status=200):
+        # Use the real lookup and sender together; replace only their external dependencies.
+        collection = {
+            "page": 1, "total_pages": 1 if remote is not None else 0, "per_page": 25,
+            "_embedded": {"osdi:people": [remote] if remote is not None else []},
+        }
+        output = io.StringIO()
+        errors = io.StringIO()
+        events = []
+        real_claim = RecordQueue.begin_send
+
+        def get(url, **kwargs):
+            self.assertEqual(url, CONFIG.people_url)
+            self.assertEqual(kwargs["headers"], CONFIG.headers)
+            self.assertFalse(kwargs["allow_redirects"])
+            field = kwargs["params"]["filter"].partition(" eq ")[0]
+            self.assertIn(field, ("email_address", "phone_number"))
+            expected = RECORD["email" if field == "email_address" else "phone"]
+            self.assertEqual(kwargs["params"], {"filter": f"{field} eq '{expected}'", "page": 1})
+            events.append(f"GET {field}")
+            response = Mock(status_code=phone_status if field == "phone_number" else 200)
+            response.json.return_value = collection
+            return response
+
+        def claim(queue, item):
+            self.assertTrue(allow_submit, "No send claim is permitted in this case")
+            self.assertEqual(events[-2:], ["GET email_address", "GET phone_number"])
+            real_claim(queue, item)
+            events.append("claim")
+
+        def post(url, **kwargs):
+            self.assertTrue(allow_submit, "POST is forbidden in this case")
+            self.assertEqual(url, CONFIG.people_url)
+            self.assertEqual(kwargs["headers"], CONFIG.headers)
+            self.assertEqual(kwargs["json"], send_person.build_actionbuilder_payload(RECORD))
+            self.assertFalse(kwargs["allow_redirects"])
+            if standalone is None:
+                self.assertEqual(events[-1], "claim")
+            events.append("POST")
+            response = Mock(status_code=201)
+            response.json.return_value = sender_fixture.SUCCESS
+            return response
+
+        with (
+            patch.object(send_person, "load_dotenv"),
+            patch.object(send_person.ActionBuilderConfig, "from_environment", return_value=CONFIG),
+            patch.object(send_person.requests, "get", side_effect=get),
+            patch.object(send_person.requests, "post", side_effect=post),
+            patch.object(RecordQueue, "begin_send", autospec=True, side_effect=claim),
+            patch.object(send_person.time, "sleep"),
+            redirect_stdout(output),
+            redirect_stderr(errors),
+        ):
+            if check_only:
+                status = send_person.check_queue(self.queue_dir)
+            else:
+                argv = ["send_person.py", "--queue-dir", str(self.queue_dir), "--submit"]
+                if standalone is not None:
+                    argv.append(str(standalone))
+                with patch("sys.argv", argv):
+                    status = send_person.main()
+        return status, output.getvalue() + errors.getvalue(), events
+
     def test_real_lookup_and_sender_contract_with_mocked_http(self):
-        for existing, check_only in ((False, False), (True, False), (True, True)):
-            with self.subTest(existing=existing, check_only=check_only):
-                self.queue_dir = self.folder / f"http-{existing}-{check_only}"
-                item = self.seed_queue([RECORD])[0]
-                events = []
-                remote = {**send_person.build_actionbuilder_payload(RECORD)["person"],
-                          "identifiers": [IDENTIFIER]}
-                collection = {
-                    "page": 1, "total_pages": 1 if existing else 0, "per_page": 25,
-                    "_embedded": {"osdi:people": [remote] if existing else []},
-                }
-
-                def get(url, **kwargs):
-                    self.assertEqual(url, CONFIG.people_url)
-                    self.assertEqual(kwargs["headers"], CONFIG.headers)
-                    self.assertFalse(kwargs["allow_redirects"])
-                    events.append("get")
-                    response = Mock(status_code=200)
-                    response.json.return_value = collection
-                    return response
-
-                def post(url, **kwargs):
-                    self.assertEqual(url, CONFIG.people_url)
-                    self.assertEqual(kwargs["headers"], CONFIG.headers)
-                    # Verify the real claim was durable before HTTP POST.
+        for kind in ("existing", "ambiguous"):
+            for check_only in (False, True):
+                with self.subTest(kind=kind, check_only=check_only):
+                    self.queue_dir = self.folder / f"http-{kind}-{check_only}"
+                    item = self.seed_queue([RECORD])[0]
+                    remote = {**send_person.build_actionbuilder_payload(RECORD)["person"], "identifiers": [IDENTIFIER]}
+                    if kind == "ambiguous":
+                        remote["additional_name"] = "Z"
+                    status, output, events = self.run_real_precheck(remote=remote, check_only=check_only)
+                    self.assertEqual(status, 1, output)
+                    self.assertEqual(events, ["GET email_address", "GET phone_number"])
                     state = json.loads((self.queue_dir / STATE_NAME).read_text())
-                    self.assertEqual(state["records"][item.id]["status"], "sending")
-                    self.assertEqual(state["records"][item.id]["lookup"]["outcome"], "not_found")
-                    events.append("post")
-                    response = Mock(status_code=201)
-                    response.json.return_value = sender_fixture.SUCCESS
-                    return response
-
-                # The real config loader is replaced; no .env is read.
-                with patch.object(send_person.ActionBuilderConfig, "from_environment", return_value=CONFIG) as settings, \
-                        patch.object(send_person.requests, "get", side_effect=get) as get_mock, \
-                        patch.object(send_person.requests, "post", side_effect=post) as post_mock, \
-                        patch.object(send_person.time, "sleep"), redirect_stdout(io.StringIO()):
-                    status = send_person.send_queue(self.queue_dir, None, not check_only,
-                                                    check_only=check_only)
-                settings.assert_called_once()
-                self.assertEqual(get_mock.call_count, 3)
-                state = json.loads((self.queue_dir / STATE_NAME).read_text())
-                receipt = state["records"][item.id]["lookup"]
-                self.assertEqual(receipt["destination"], CONFIG.destination)
-                if existing:
-                    self.assertEqual(status, 1)
-                    post_mock.assert_not_called()
-                    self.assertEqual(receipt["outcome"], "existing")
-                    self.assertEqual(receipt["candidates"][0]["identifiers"], [IDENTIFIER])
+                    receipt = state["records"][item.id]["lookup"]
+                    self.assertEqual(receipt["destination"], CONFIG.destination)
                     self.assertEqual(state["records"][item.id]["status"], "review")
+                    self.assertTrue((self.queue_dir / "review" / item.path.name).is_file())
+                    self.assertNotIn(CONFIG.api_key, json.dumps(state))
+                    self.assertEqual(receipt["outcome"], "existing" if kind == "existing" else "needs_review")
+                    self.assertEqual(receipt["candidates"][0]["identifiers"], [IDENTIFIER])
+                    if kind == "ambiguous":
+                        self.assertIn("additional_name", receipt["candidates"][0]["differing_fields"])
+                    # Later submissions skip review records completely.
+                    status, output, events = self.run_real_precheck()
+                    self.assertEqual(status, 0, output)
+                    self.assertEqual(events, [])
+
+    def test_historical_empty_search_hold_survives_reopen_resolution_and_alias(self):
+        item = self.seed_queue([RECORD])[0]
+        historical_hold = LookupResult("needs_review", "Earlier policy required manual absence review.")
+        self.assertEqual(self.run_check(historical_hold)[0], 1)
+        changed = {**RECORD, "phone": "12025550199"}
+        with RecordQueue(self.queue_dir) as queue:
+            self.assertEqual(queue.pending_records(), [])
+            with self.assertRaises(QueueError):
+                queue.begin_send(item)
+            for family, record in ((item.family, RECORD), (item.family, changed), ("renamed", RECORD)):
+                with self.subTest(family=family, phone=record["phone"]):
+                    outcome = queue.enqueue(family, record, {"later-source"}, ["later.pdf"], resolve=True)
+                    self.assertEqual(outcome, "review")
+                    self.assertEqual(queue.pending_records(), [])
+            with self.assertRaises(QueueError):
+                queue.record_lookup(item, CLEAR.as_history(CONFIG))
+        with RecordQueue(self.queue_dir) as queue:
+            self.assertEqual(queue.pending_records(), [])
+            self.assertEqual(queue.status_for("renamed"), "review")
+
+    def test_real_empty_search_clears_then_submits_once_after_fresh_gets(self):
+        item = self.seed_queue([RECORD])[0]
+        status, submit, output, _ = self.run_sender()
+        self.assertEqual(status, 0, output)
+        self.last_lookup.assert_not_called()
+        submit.assert_not_called()
+
+        status, output, events = self.run_real_precheck(check_only=True)
+        self.assertEqual(status, 0, output)
+        self.assertEqual(events, ["GET email_address", "GET phone_number"])
+        state = json.loads((self.queue_dir / STATE_NAME).read_text())
+        entry = state["records"][item.id]
+        self.assertEqual(entry["status"], "pending")
+        self.assertEqual(entry["lookup"]["outcome"], "not_found")
+        self.assertEqual(entry["lookup"]["candidates"], [])
+        self.assertEqual(entry["lookup"]["destination"], CONFIG.destination)
+        self.assertNotIn(CONFIG.api_key, json.dumps(state))
+        self.assertTrue(item.path.is_file())
+
+        status, output, events = self.run_real_precheck(allow_submit=True)
+        self.assertEqual(status, 0, output)
+        self.assertEqual(events, ["GET email_address", "GET phone_number", "claim", "POST"])
+        state = json.loads((self.queue_dir / STATE_NAME).read_text())
+        self.assertEqual(state["records"][item.id]["status"], "sent")
+        self.assertTrue((self.queue_dir / "sent" / item.path.name).is_file())
+        self.assertFalse(item.path.exists())
+
+        status, output, events = self.run_real_precheck()
+        self.assertEqual(status, 0, output)
+        self.assertEqual(events, [])
+
+    def test_real_submit_holds_new_match_after_successful_clearance(self):
+        item = self.seed_queue([RECORD])[0]
+        status, output, _ = self.run_real_precheck(check_only=True)
+        self.assertEqual(status, 0, output)
+        remote = {**send_person.build_actionbuilder_payload(RECORD)["person"], "identifiers": [IDENTIFIER]}
+        status, output, events = self.run_real_precheck(remote=remote)
+        self.assertEqual(status, 1, output)
+        self.assertEqual(events, ["GET email_address", "GET phone_number"])
+        state = json.loads((self.queue_dir / STATE_NAME).read_text())
+        self.assertEqual(state["records"][item.id]["status"], "review")
+        self.assertEqual(state["records"][item.id]["lookup"]["outcome"], "existing")
+
+    def test_real_second_search_failure_blocks_even_after_earlier_clearance(self):
+        for previously_checked in (False, True):
+            with self.subTest(previously_checked=previously_checked):
+                self.queue_dir = self.folder / f"failed-phone-{previously_checked}"
+                item = self.seed_queue([RECORD])[0]
+                if previously_checked:
+                    self.assertEqual(self.run_real_precheck(check_only=True)[0], 0)
+                status, output, events = self.run_real_precheck(phone_status=400)
+                self.assertEqual(status, 1, output)
+                self.assertEqual(events, ["GET email_address", "GET phone_number"])
+                state = json.loads((self.queue_dir / STATE_NAME).read_text())
+                entry = state["records"][item.id]
+                self.assertEqual(entry["status"], "pending")
+                if previously_checked:
+                    self.assertEqual(entry["lookup"]["outcome"], "not_found")
                 else:
-                    self.assertEqual(status, 0)
-                    self.assertEqual(events, ["get", "get", "get", "post"])
-                    self.assertEqual(state["records"][item.id]["status"], "sent")
+                    self.assertNotIn("lookup", entry)
+                self.assertIn("HTTP 400", output)
+
+    def test_real_empty_search_allows_standalone_submit(self):
+        path = self.folder / "standalone.json"
+        path.write_text(json.dumps(RECORD), encoding="utf-8")
+        status, output, events = self.run_real_precheck(standalone=path, allow_submit=True)
+        self.assertEqual(status, 0, output)
+        self.assertEqual(events, ["GET email_address", "GET phone_number", "POST"])
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), RECORD)
+        self.assertFalse(self.queue_dir.exists())
+
 
 
 if __name__ == "__main__":

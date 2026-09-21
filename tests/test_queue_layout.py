@@ -121,7 +121,7 @@ class QueueLayoutTests(unittest.TestCase):
                                  "uncertain" if status == "sending" else status)
                 self.assertTrue(queue.known_sources(f"{status}-organized", {f"source-{status}"}))
         state = json.loads((self.queue_dir / ".queue-state.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["version"], 2)
+        self.assertEqual(state["version"], 3)
 
     def test_partially_moved_legacy_queue_finishes_migration(self):
         filenames = self.seed_flat_v1(("pending", "sent"))
@@ -255,8 +255,10 @@ class QueueLayoutTests(unittest.TestCase):
             (default / folder).mkdir(parents=True)
             (default / folder / ".gitkeep").write_text("", encoding="utf-8")
         # Patch both constants: this regression never examines the real queue.
-        with patch.object(record_queue, "DEFAULT_QUEUE", default), \
-                patch.object(record_queue, "LEGACY_QUEUE", legacy):
+        with (
+            patch.object(record_queue, "DEFAULT_QUEUE", default),
+            patch.object(record_queue, "LEGACY_QUEUE", legacy),
+        ):
             with self.assertRaises(QueueError):
                 with RecordQueue(default):
                     pass
@@ -268,8 +270,10 @@ class QueueLayoutTests(unittest.TestCase):
         legacy = self.folder / "senders_pdfs"
         legacy.mkdir()
         (legacy / ".gitkeep").write_text("", encoding="utf-8")
-        with patch.object(record_queue, "DEFAULT_QUEUE", self.queue_dir), \
-                patch.object(record_queue, "LEGACY_QUEUE", legacy):
+        with (
+            patch.object(record_queue, "DEFAULT_QUEUE", self.queue_dir),
+            patch.object(record_queue, "LEGACY_QUEUE", legacy),
+        ):
             with RecordQueue(self.queue_dir) as queue:
                 self.assertEqual(queue.pending_records(), [])
         self.assertTrue((legacy / ".gitkeep").is_file())

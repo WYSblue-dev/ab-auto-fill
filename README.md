@@ -2,7 +2,7 @@
 
 This tool reads contact information from completed Jotform PDFs so you do not have to type it into Action Builder by hand.
 
-**Available now:** it finds matching PDFs in your Downloads folder, checks their contact details, compares repeated downloads, and puts the results in a local waiting list. You can preview that list and check for existing people in the configured Action Builder campaign before sending.
+**Available now:** it finds matching PDFs in your Downloads folder, checks their contact details, compares repeated downloads, and puts the results in a local waiting list. You can preview that list, check for existing people by email and phone in the configured Action Builder campaign, and submit records with no matches. Existing or possible matches are held for review.
 
 **Still planned:** a file on your desktop that starts the process when you double-click it. For now, the person setting this up runs the commands below. The existing-person check is implemented, but its matching rules and the remaining issues in the code review still need validation before rollout.
 
@@ -15,8 +15,10 @@ Before rollout, read the [detailed code walkthrough and review](CODE_REVIEW.md).
 3. **Compare copies.** Filenames ending in `(1).pdf`, `(2).pdf`, and similar numbers are checked together with the original. Different contact details are held for review.
 4. **Add the result to the waiting list.** Each accepted contact record is saved as a small `.json` file inside `composed_info/pending`. JSON is simply a text format the sending program can read.
 5. **Preview.** The sending program shows the pending records without using the API.
-6. **Check Action Builder.** `action_builder_lookup.py` searches the configured campaign using GET requests. Existing people and possible matches move to `review`; records without a match remain `pending`.
-7. **Send.** Sending requires the separate `--submit` option. The sender always performs a fresh existing-person check before each creation attempt, even if you already ran the separate check.
+6. **Check Action Builder.** `action_builder_lookup.py` searches email and phone in the configured campaign using GET requests. Existing or possible matches move to `review`. Records remain pending with a saved `not_found` result only when both searches complete successfully without candidates.
+7. **Submit pending records.** `send_person.py --submit` repeats both searches immediately before each send. Records still unmatched are submitted to Action Builder; matches move to review and a failed lookup stops the run. Confirmed sends are recorded in `sent`.
+
+The needs-review folder is named **`composed_info/review`**. Run `review_person.py` to work through held records one at a time: correct their details, approve a reviewed submission, keep them for later, or discard them. **Pending is a waiting list, not a permanent approval:** newly extracted records and records whose lookup failed can also be there. Always read lookup errors; submission performs fresh checks so those records cannot bypass the lookup.
 
 The original PDFs stay in Downloads, unchanged. **`composed_info` stores contact JSON files and processing history.** No new PDFs are generated, and the PDFs themselves are not sent to Action Builder.
 
@@ -26,13 +28,13 @@ The tool creates this folder beside the Python scripts:
 
 ```text
 composed_info/
-    pending/             Contact records waiting for preview and API checks
+    pending/             Unsent contact records; may be unchecked or checked with no matches
     sent/                Contact records the sender has recorded as successful
     review/              Contact records held for attention
     .queue-state.json    The tool's history of files and sending attempts
 ```
 
-The tool manages these folders for you. After a send is accepted as successful by the current response checks, the contact file moves to `sent`. Those checks still need strengthening, as described in the code review; during validation, verify the resulting person in Action Builder. Unsent records held because of corrected or unfinished paperwork, or an existing-person match, move to `review`. A record also stays in `review` while its send is in progress or if the result of that attempt is uncertain.
+The tool manages these folders for you. API matches move to `review`; completed email and phone searches with no candidates leave records in `pending`. Corrected or unfinished paperwork can also cause holds. During a send attempt the JSON moves to `review`, then to `sent` when the API returns a usable person receipt. Uncertain attempts remain held. Discarded contact files are removed, while their history remains to prevent accidental re-import.
 
 **An empty `review` folder does not mean there is nothing to review.** An invalid PDF or conflicting first-time copies may never produce a usable contact JSON. Read the scan messages and check the source PDFs; the history still records the affected download group.
 
@@ -62,14 +64,14 @@ The number in `(1)` does not prove that a file is a correction. The tool checks 
 
 These comparisons concern the nine contact fields only. A change to excluded information, such as a beneficiary, does not create another contact record.
 
-The waiting list remembers successful sends on this computer. The separate API lookup also checks for people entered in the configured campaign by other means. It does not search the entire organization or coordinate separate computers. Two computers could both check before either creates the person, so use one sending computer while a shared sending workflow is still being designed.
+The waiting list remembers successful sends on this computer. The separate API lookup also checks for people entered in the configured campaign by other means. It does not search the entire organization or coordinate separate computers. Two computers could both check before either creates the person. Keep the initial validation on one designated computer; a local queue does not coordinate separate senders.
 
 ## If something goes wrong
 
 - **No files were found:** Check the Downloads folder and filename ending with your setup person. A different ending can be configured without editing Python code.
 - **Waiting for downloads:** Let the browser finish downloading, then run extraction again. By default, a file must be at least two seconds past its last modification before it can be read.
-- **Needs review:** Check the identified PDFs and, for an existing-person match, the corresponding Action Builder record. The program does not automatically choose which version is correct, update an existing person, or delete anything.
-- **Lookup stopped:** The search did not complete reliably. The affected record stays pending and is not sent; fix the reported problem and check again. Earlier completed holds or sends remain recorded.
+- **Needs review:** Run `review_person.py`, read the saved reason, and check the paperwork and candidate Action Builder records. A possible match is not a confirmed duplicate. Older empty-search holds also remain until you make a review decision. The command changes local contact data and can create a person after confirmation; it does not update an existing remote person.
+- **Lookup stopped:** The search did not complete reliably. The affected record stays pending and is not sent; later records in that run may not have been checked. Fix the reported problem and check again. Earlier completed decisions and sends remain recorded.
 - **Preview only:** Nothing was sent. This lets you compare the extracted details with the paperwork.
 - **A send failed or its outcome is uncertain:** Have the setup person check Action Builder. The tool holds that attempted record instead of automatically retrying it.
 - **The queue is locked:** Another run may still be active. If a previous run crashed, the setup person must confirm it has stopped and review its state. Do not remove files to force another send.
@@ -101,6 +103,8 @@ cd ab_automation
 ```
 
 If the project has already been copied or cloned, open a terminal in that existing folder instead. Do not create a second copy of a working queue as a way to retry sending.
+
+Use the branch or release containing the version you reviewed. Changes made only on your original computer will not appear in a fresh clone until they have been committed and pushed.
 
 **2. Create the virtual environment and install packages.** Choose the commands for your computer.
 
@@ -172,14 +176,19 @@ A passing test run does not establish that the live campaign's API responses or 
 
 ### Everyday command reference
 
-Run the preparation and checking commands in order, inspect the messages and preview, and use the separate sending command only when ready to create records in the configured campaign.
+Run extraction, preview, and the GET check in order. Read the check results and resolve any lookup errors, then submit the remaining pending records. Submission repeats the checks before sending.
 
 | Step | macOS | Windows PowerShell | Effect |
 |---|---|---|---|
 | 1. Extract downloaded PDFs | `./.venv/bin/python extract_person.py` | `.\.venv\Scripts\python.exe extract_person.py` | Reads local PDFs and changes the local queue. |
 | 2. Preview pending records | `./.venv/bin/python send_person.py` | `.\.venv\Scripts\python.exe send_person.py` | Prints the proposed payloads without API requests. |
 | 3. Check existing people | `./.venv/bin/python action_builder_lookup.py` | `.\.venv\Scripts\python.exe action_builder_lookup.py` | Reads the API with GET and saves local decisions or holds. |
-| 4. Send after review | `./.venv/bin/python send_person.py --submit` | `.\.venv\Scripts\python.exe send_person.py --submit` | Rechecks the API and may create people with POST. |
+| 4. Submit pending records | `./.venv/bin/python send_person.py --submit` | `.\.venv\Scripts\python.exe send_person.py --submit` | Rechecks email and phone; creates a person only when both searches complete with no matches. |
+| Review held records | `./.venv/bin/python review_person.py` | `.\.venv\Scripts\python.exe review_person.py` | Shows records individually; lets you edit, keep, discard, or explicitly approve a submission. |
+
+On a fresh installation, download the PDFs before step 1. Extraction creates the local queue as needed. Preview **before** lookup to compare the extracted records with the paperwork. Lookup then separates possible duplicates into `review` and leaves successful no-match results in `pending`. You can run the preview again to inspect that remaining list; preview never sends.
+
+If a lookup fails, the affected and not-yet-checked records can remain pending. Their folder location is not proof of clearance. `--submit` always repeats the lookup before each POST, and it does not release any review holds.
 
 The detailed examples below use the macOS interpreter path. On Windows, replace `./.venv/bin/python` with `.\.venv\Scripts\python.exe`; keep the script name and options the same, and use Windows paths for your folders. Quote any path containing spaces. For example:
 
@@ -235,25 +244,59 @@ For another queue:
 
 This requires the same connection settings as sending. It makes **GET requests only**: it reads Action Builder and saves the decisions locally. It never creates, updates, or deletes a remote person.
 
-The check searches email and phone independently, then searches the surname for possible matches with the same first name or street address. It compares the nine contact fields with limited formatting normalization. One person with all matching fields is recorded as `existing`; differing details or several candidates are `needs_review`. Both outcomes move the local record to `review`. `not_found` leaves it pending.
+The check searches **email and phone only**, independently. On September 21, 2026, you reported successful unfiltered, email, and phone GET requests, while the API rejected `family_name`, `given_name`, and `name` filters. The program therefore does not send name-filter queries. It still compares the names and address of each person returned by email or phone.
+
+| Completed check | Saved result | What to do |
+|---|---|---|
+| One Person with all nine comparison fields matching | `existing`; move to `review` | Compare the candidate with the paperwork. |
+| Differing details, uncertain entity type, or several candidates | `needs_review`; move to `review` | Investigate the saved candidate IDs and differences. |
+| Both email and phone searches complete successfully with no candidates | `not_found`; stay in `pending` | Eligible for submission after a fresh check by `--submit`. |
+
+`not_found` means no person was found using these email and phone values in this campaign. It is not proof the person is absent: an existing person whose email **and** phone have changed can be missed. A failed or incomplete request is different from a completed empty search: it raises an error, leaves that record pending, and stops the run without a POST for that record. A previous `not_found` receipt cannot bypass a fresh check.
 
 The history saves the check time, campaign, candidate IDs, and names of matching/differing fields. It does not copy the candidate's personal values or your API key into that receipt. The program retains the contact JSON and does not delete source PDFs, so you can compare the paperwork with Action Builder.
 
-**There is not yet a command to release an API-related hold after review.** A fresh PDF import or `--resolve` cannot bypass that hold, including through connected filename aliases. Have the setup person review Action Builder and the recorded reason; do not delete history or move files to force a submission. The operator reconciliation workflow is still to be implemented.
+**Use `review_person.py` for an API-related hold.** A fresh PDF import or `--resolve` cannot bypass that hold, including through connected filename aliases. The interactive command records your decision and can submit one reviewed record directly after confirmation. Do not delete history or move files to force a submission.
 
-A successful no-match check is a result for that moment and that campaign, not proof that the latest PDF has been extracted. Run extraction again after corrections arrive, compare the paperwork, and address its scan messages. A person with changed names and contact details can also escape these matching rules.
+**Earlier empty-result holds are preserved.** If an older version saved `needs_review` with no candidates, upgrading does not move it back to pending. It appears in the interactive review command so you can decide what to do.
 
-### Send the pending records
+A completed check concerns stored information in that campaign; it does not prove that the latest PDF has been extracted. Run extraction again after corrections arrive, compare the paperwork, and address its scan messages.
+
+### Submit the remaining pending records
 
 ```sh
 ./.venv/bin/python send_person.py --submit
 ```
 
-The `--submit` option first makes fresh GET checks and then sends POST requests for records with no detected match, one pending record at a time. Matches are held for review. An incomplete or failed lookup stops the run before a creation attempt for that record. It requires the connection settings and an internet connection. The tool moves each claimed record into `review` while sending, then into `sent` when the send succeeds. Successful sends are recorded in the history so the next queue run does not send them again.
+The `--submit` option makes fresh email and phone GET checks for each pending record. **If both searches complete successfully with no candidates, it sends that record to create a person.** If either search returns a candidate, the record moves to `review` without a POST. An incomplete or failed lookup stops the run before a send claim and leaves the affected record pending; later records remain untouched. This command requires connection settings and an internet connection.
 
-If a request is attempted but the outcome cannot be confirmed, that record remains in `review` with an uncertain status in the history. A timeout does not prove that Action Builder rejected the person. Check Action Builder before any recovery; deleting the queue history is not a retry procedure.
+The sender records the attempt before making its POST. A returned person with a valid Action Builder ID moves the record to `sent`; an attempted POST whose outcome cannot be confirmed stays in `review` with an uncertain history status. A timeout does not prove that Action Builder rejected the person. Check Action Builder before any recovery; deleting the queue history is not a retry procedure.
+
+Review-held and already sent records are excluded from the pending batch. A previously saved no-match result never replaces the fresh check. Running `--submit` does not approve or release a held record.
 
 Run extraction again after new or corrected PDFs arrive, then preview before submitting. Sending reads the stored contact records; it does not rescan Downloads for new corrections.
+
+### Review held records one at a time
+
+```sh
+./.venv/bin/python review_person.py
+```
+
+For a custom queue, add `--queue-dir "/full/path/to/composed_info"`. On Windows, use `.\.venv\Scripts\python.exe review_person.py`.
+
+The command shows each person's nine contact fields, source filenames, review reason, and any saved candidate IDs. Check the paperwork and Action Builder before choosing to send. You can:
+
+- **Change:** select a field, see its old value, and type the replacement. Blank input keeps the existing value. Invalid values are rejected. The completed changes are saved and the whole person is displayed again before you are asked about sending.
+- **Send:** perform fresh email/phone searches, show the result, and ask for final confirmation. If candidates still appear, you must explicitly confirm that they are different people before authorizing creation. A previous uncertain attempt also requires checking that it did not already create this person.
+- **Keep:** leave the record in review for another time.
+- **Discard:** confirm removal of the contact JSON from review. A small history entry remains so the same contact does not reappear on the next import. Source PDFs and Action Builder records are not deleted.
+- **Quit:** end the session without processing the remaining people.
+
+Reading, changing, keeping, and discarding require no API key and make no API calls. Sending requires the normal `.env` settings. Blank confirmations default to **No**. The command holds the queue lock during the session, so close it before running extraction or sending in another terminal.
+
+Changes affect the local contact only; they do not update an existing Action Builder person. A reviewed submission creates a person and records the decision. A related record already marked sent blocks another creation. A failed lookup prevents sending; an uncertain POST stops the session and retains the hold.
+
+The command can only display records for which a contact JSON exists. If PDF extraction failed before producing one, correct or resolve the source PDF first. Discarded records and old versions replaced during editing stay in history but no longer have a review file. Do not restore them by editing the history manually.
 
 ### Choose the correct version of an unsent PDF
 
@@ -268,6 +311,8 @@ Include the same `--downloads-dir`, `--marker`, and `--queue-dir` options used f
 `--resolve` is for a checked, unsent PDF correction. It does not clear an API-related hold or authorize sending another person after a related record has already been sent or attempted. Those cases require checking the existing Action Builder record.
 
 ### Upgrading an older queue
+
+The review command uses version 3 of the queue history. Opening an older version 1 or 2 queue upgrades it automatically while preserving its records and holds. Keep a backup of the whole queue, and use this updated code for the upgraded history; older code does not understand discarded records.
 
 An older queue may have stored all contact JSON files alongside `.queue-state.json` in one folder. When the updated tool opens that folder, it converts the layout in place, putting the records into `pending`, `sent`, or `review` while retaining the existing history.
 
@@ -288,17 +333,20 @@ To create a separate JSON file instead of using the queue, supply `--output` exp
 ./.venv/bin/python send_person.py "/full/path/to/approved.json"
 ```
 
-Appending `--submit` to the second command performs the same fresh API lookup and submits only if no match is detected. That lookup requires usable names, email, US phone, and address even for a standalone file. **Standalone files outside the queue do not have the queue's sending history.** If extraction fails, an older output may still exist; do not send that older file accidentally. The no-argument workflow no longer writes `pending_person.json`.
+Appending `--submit` to the second command performs the same fresh email/phone lookup and posts only after both searches complete without candidates. Matches or lookup errors prevent that POST. The lookup requires usable names, email, US phone, and address even for a standalone file. **Standalone files outside the queue do not have the queue's sending history.** If extraction fails, an older output may still exist; do not send that older file accidentally. The no-argument workflow no longer writes `pending_person.json`.
 
 ### Understanding the code in the morning
+
+The code uses short comments for important workflow decisions and less obvious rules. Function docstrings describe each function's job. Repetitive line-by-line Python explanations have been removed so the actual code is easier to follow. The open findings in [CODE_REVIEW.md](CODE_REVIEW.md) still apply.
 
 Start at `main()` near the bottom of `extract_person.py`, then follow the modules in this order:
 
 1. **`pdf_downloads_finder.py`** finds matching filenames, groups numbered copies, and computes file fingerprints. A fingerprint lets it compare file contents without relying on the filename or date alone.
 2. **`extract_person.py`** reads the checklist and compares the nine extracted contact values across copies. `import_downloads()` coordinates the scan; `extract_approved_person()` handles one PDF.
-3. **`record_queue.py`** stores contact JSON under `composed_info/pending`, `sent`, or `review`, with `.queue-state.json` at the root. The history tracks pending, review, sending, sent, and uncertain statuses; the folders follow those statuses. A lock prevents two runs from changing the same queue at once.
-4. **`action_builder_lookup.py`** checks the destination settings, searches Action Builder, validates complete search results, and classifies possible matches. Its standalone command checks pending records and saves local review decisions.
-5. **`send_person.py`** builds the Action Builder request, previews offline, or calls the lookup before submitting with `--submit`. `check_queue()` reuses its queue workflow for GET checks without a POST.
+3. **`record_queue.py`** stores contact JSON under `composed_info/pending`, `sent`, or `review`, with `.queue-state.json` at the root. History also remembers discarded records after their files are removed. A lock prevents two runs from changing the same queue at once.
+4. **`action_builder_lookup.py`** checks the destination settings, searches Action Builder, validates complete search results, and classifies possible matches. Its standalone command saves no-match decisions for pending records and moves matches to review.
+5. **`send_person.py`** builds the Action Builder request, previews offline, or rechecks and submits pending records with `--submit`. Only a fresh no-match result permits a POST. `check_queue()` reuses its queue workflow for GET checks and saved local decisions without sending.
+6. **`review_person.py`** handles individual manual decisions: show, edit, keep, discard, or approve a reviewed submission. It uses the same lookup and POST helper, with explicit confirmation when overriding candidate matches.
 
 Inside extraction, `parse_approved_person()` verifies the page size and printed labels before reading answers. `FIELDS` contains answer areas; `LABEL_AREAS` checks that the template still matches. PDF coordinates start at the bottom-left. `read_page_fragments()` combines the PDF's text and page transformations to find the displayed text positions.
 
@@ -323,12 +371,12 @@ Git is for the program, tests, example configuration, and documentation. Each in
 
 When updating an installation, stop running scripts first, retain the complete local queue and configuration, install the required packages into that computer's environment, and rerun the tests. Do not replace the queue with the repository's empty folder structure. A deliberate backup should keep the history and all contact folders together in a private location.
 
-For the current changes, see the suggested commit title and body in [COMMIT_MESSAGE.md](COMMIT_MESSAGE.md). [CODE_REVIEW.md](CODE_REVIEW.md) contains the detailed review and release checks. Read the proposed message, review the exact staged files, and finish validation before committing or pushing.
+[CODE_REVIEW.md](CODE_REVIEW.md) contains the detailed review, release checks, and commit guidance. Review the exact staged files and finish validation before committing or pushing.
 
 ### Still needed for the desktop version
 
 - A desktop file that launches the correct Python environment and coordinates extraction, review, and sending.
-- Validation of the existing-person matching rules against a controlled test campaign, and coordination of creation across computers.
+- A supported manual-resolution workflow for held records, validation against a controlled test campaign, and coordination across computers.
 - A clear review and recovery interface for corrected paperwork and uncertain sends.
 - Progress and completion messages that remain visible for everyday users.
 

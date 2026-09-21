@@ -11,13 +11,8 @@ The lookup is now implemented in action_builder_lookup.py and runs before POST.
 
 from __future__ import annotations
 
-# for the purpose of command line args
 import argparse
-
-# for the purpose of json oriented actions
 import json
-
-# operating system needed for environ.get() capturuing
 import os
 import re
 import sys
@@ -38,70 +33,44 @@ from record_queue import (
 )
 
 
-# Retained as an annotated learning example. Runtime configuration now comes
-# from ActionBuilderConfig, shared by the GET lookup and POST submission.
-# checks environment variables and grabs them with os.environ.get()
+# Learning helper; runtime settings now come from ActionBuilderConfig.
 def require_environment_variable(name: str) -> str:
     """The function that is used for the purpose of capturing a .env file
     variable."""
-    # Get the value of the .env desired. Default empty.
-    value = os.environ.get(name, "").strip()  # remove whitespace
+    value = os.environ.get(name, "").strip()
 
-    # If no value/empty then the name of the .env desired doesn't exist.
     if not value:
-        # raise the error with the information related.
         raise RuntimeError(f"Required environment variable is missing: " f"{name}")
-    # returns the value of the variable since exist.
     return value
 
 
-# load the information based on the file path(arg in command line)
-# raise errors if not found or not a dict
 def load_approved_person(input_path: str | Path) -> dict[str, Any]:
     """This gets the information of the json we load in through the specfic
     path that we want. This would want to be a search later for an automation"""
-    # take the path(json) and create the Path related obj.
     path = Path(input_path)
-    # check that it's a file
     if not path.is_file():
-        # raise error if not found(would mean file process didn't work)
         raise FileNotFoundError(f"Approved JSON file not found: {path}")
-    # loads json file since FileNotFoundError wasn't raised. Read the text
-    # with the utf-8 to decode to a python object dictionary.
     data = json.loads(path.read_text(encoding="utf-8"))
-    # must be a dict type object(json)
     if not isinstance(data, dict):
         raise TypeError("The approved record must be a JSON object.")
-    # return the dict data
     return data
 
 
-# used in the build_actionbuilder_payload for the input_fields. Needed to check
-# that the values are strs. Uses the data from person we want to enter.
 def require_string(record: dict[str, Any], field_name: str) -> str:
     """This is expecting a dictionary and uses the values of that dictnarhy
     of to get a str value. We check the value obtained here and return it."""
-    # value is the name variable to using .get(). the .get uses the field_name
-    # parameter and that is a key that will get the value associated
     value = record.get(field_name)
 
-    # if the value isn't of of a str type then raise valueerror
     if not isinstance(value, str):
-        # helpful error message.
         raise ValueError(f"{field_name} must be a string.")
 
-    # strip the whitespace.
     value = value.strip()
 
-    # if no value must be entered.
     if not value:
-        # raise error if blank(empty str)
         raise ValueError(f"{field_name} cannot be blank.")
-    # return the str value that is desired.
     return value
 
 
-# compose the payload that is going to be used for action builder
 def build_actionbuilder_payload(record: dict[str, Any]) -> dict[str, Any]:
     """
     Expects a dictionary of the approved person loaded for the entry.
@@ -122,14 +91,11 @@ def build_actionbuilder_payload(record: dict[str, Any]) -> dict[str, Any]:
     expectations in conjunction with its form.
     """
 
-    # these are the fields that we desire based on our forms of action builder
-    # if we want to expand or reduce we would do that here.
-
-    # syntactially this is a set. Means no duplicates are possible
+    # Only these approved contact fields may enter the API payload.
     allowed_input_fields = {
         "given_name",
         "family_name",
-        # middle name, preferred name, suffix??? How or do we handle these?
+        # Middle name, preferred name, and suffix handling still need a policy.
         "additional_name",
         "email",
         "phone",
@@ -139,26 +105,17 @@ def build_actionbuilder_payload(record: dict[str, Any]) -> dict[str, Any]:
         "postal_code",
     }
 
-    # Use set function removes duplicates of keys from record dict. We subtract
-    # the fields(keys) we anticipate. Leaves fileds(keys) that are unexpected.
     unexpected_fields = set(record) - allowed_input_fields
-    # raise and error if those fileds exist.
     if unexpected_fields:
         raise ValueError(
             "Unapproved fields were found in the local "
             f"record: {sorted(unexpected_fields)}"
         )
 
-    # Dictionary that uses use require_string, is_digits, and default
-    # values. Populated with 3 keys and values to start out before more added.
-    # Raises errors if need be and builds the dictionary correctly.
     person: dict[str, Any] = {
         "action_builder:entity_type": "Person",
-        # set the field_name "given_name" to the value of a str
         "given_name": require_string(
-            # dictionary
             record,
-            # .get with the key
             "given_name",
         ),
         "family_name": require_string(
@@ -167,7 +124,7 @@ def build_actionbuilder_payload(record: dict[str, Any]) -> dict[str, Any]:
         ),
     }
 
-    # if not additional_name then equates to None and ommited because not added
+    # Leave optional values out when they are blank or unavailable.
     additional_name = record.get("additional_name")
 
     if isinstance(additional_name, str):
@@ -177,15 +134,10 @@ def build_actionbuilder_payload(record: dict[str, Any]) -> dict[str, Any]:
 
     email = record.get("email")
 
-    # check that is of str type
     if isinstance(email, str):
-        # lower and strip out the whitespace
         email = email.strip().lower()
 
-        # if str
         if email:
-            # set the email_addresses fields to equal the information given.
-            # address_type is set to default of "home"
             person["email_addresses"] = [
                 {
                     "address": email,
@@ -197,21 +149,18 @@ def build_actionbuilder_payload(record: dict[str, Any]) -> dict[str, Any]:
         "phone",
     )
 
-    # validation that the entry is number(int) related in the str format
+    # Extraction supplies the phone as digits, including its country code.
     if not phone.isdigit():
         raise ValueError(
             "Action Builder phone numbers must contain " "numeric characters only."
         )
-    # accesss the dictionary we're plugging the data into
     person["phone_numbers"] = [
         {
-            # assign number to the value
             "number": phone,
-            # set the default type to mobile
             "number_type": "Mobile",
         }
     ]
-    # postal address assignment to the dictionary we are creating
+    # The current workflow handles one US mailing address per person.
     person["postal_addresses"] = [
         {
             "address_lines": [
@@ -236,13 +185,9 @@ def build_actionbuilder_payload(record: dict[str, Any]) -> dict[str, Any]:
             "address_type": "physical",
         }
     ]
-    # return the dictinoary that is used for the purpose of entry into
-    # actionbuilder
     return {"person": person}
 
 
-# The api call to actionbuilder that actually sends the data over the
-# api provided
 def submit_to_actionbuilder(
     payload: dict[str, Any], *, config: ActionBuilderConfig | None = None,
 ) -> dict[str, Any]:
@@ -250,65 +195,54 @@ def submit_to_actionbuilder(
     to then submit that data provided the .env exist with the correct
     credentials and the connection allows the sending of the data.
     Gives us a json file of the response that was returned from the api."""
-    # The sending workflow passes the same validated settings used for GET.
-    # This prevents checking one campaign and then creating in another.
+    # Use the same campaign and credentials for lookup and submission.
     if config is None:
         config = ActionBuilderConfig.from_environment()
 
-    # Physical POST(creation) request sent to the web api with the data we have
-    # formed. The .post of the json data we are creating.
     response = requests.post(
-        # url to point to api creation.
         config.people_url,
-        # passing the headers that need specified.
         headers=config.headers,
-        # pass the dictionary of json data(build_actionbuilder_payload)
-        # JSON-encodes it to what the api is expecting. Think UTF-8
         json=payload,
-        # timeout constraints.
-        # The read timeout concerns how long Requests waits without receiving
-        # response data. It is not necessarily a total wall-clock limit for
-        # the entire request.
+        # Connect and read timeouts; this is not a total request time limit.
         timeout=(5, 30),
-        # don't allow redirects for the purpose of containing data
-        # Stop at the initial HTTP response rather than automatically
-        # requesting the redirect destination.
+        # Keep credentials and contact data on the validated endpoint.
         allow_redirects=False,
     )
 
-    # Raise a runtime error based on the conditions of codes falling within
-    # certain status codes. Essentially if the code falls between 300 and 400
+    # Requests does not treat redirects as HTTP errors automatically.
     if 300 <= response.status_code < 400:
         raise RuntimeError(
-            # message with the status code.
             "Action Builder returned an unexpected "
             f"redirect: HTTP {response.status_code}"
         )
 
-    # raises the http error if one occures. A means to express the info
-    # isn't working correclty per the status. HTTPError for unsuccessful HTTP
-    # status codes
     response.raise_for_status()
 
-    # error handling
+    # A successful HTTP status still needs a usable JSON receipt.
     try:
-        # sets the name variable result to the json type. Goes through decoder
-        # Then becomes a python object.
         result = response.json()
-    # If what returned wasn't json then raise the error
     except requests.exceptions.JSONDecodeError as error:
-        # error if response isn't json
         raise RuntimeError(
             "Action Builder returned a successful status "
             "but the response was not valid JSON."
         ) from error
-    # if not a dictionary(should be as json type) raise an error
     if not isinstance(result, dict):
-        # raise error.
         raise RuntimeError("Unexpected Action Builder response format.")
-    # return the dictionary that api returns to see what was submitted
-    # this will be used for viewing what was returned which should be what was
-    # submitted.
+    # A successful status alone is not proof that a person was created.
+    person = result.get("person")
+    identifiers = person.get("identifiers") if isinstance(person, dict) else None
+    if (
+        "error" in result or "errors" in result
+        or not isinstance(identifiers, list)
+        or any(not isinstance(value, str) or not value for value in identifiers)
+    ):
+        raise RuntimeError("Action Builder did not return a confirmed person receipt. Review the outcome before retrying.")
+    native_ids = [value for value in identifiers if value.startswith("action_builder:")]
+    if len(native_ids) != 1 or not re.fullmatch(
+        r"action_builder:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}",
+        native_ids[0],
+    ):
+        raise RuntimeError("Action Builder did not return one valid person ID. Review the outcome before retrying.")
     return result
 
 
@@ -363,12 +297,13 @@ def send_queue(directory: Path, input_file: Path | None, submit: bool,
     """Preview or send only tracked pending records, with one queue lock held."""
     with RecordQueue(directory) as queue:
         labels = {
-            "pending": "ready",
+            "pending": "pending",
             "review": "need review",
             "deferred": "waiting for download",
             "sending": "send in progress",
             "sent": "already sent",
             "uncertain": "need Action Builder check",
+            "discarded": "discarded after review",
         }
         counts = queue.status_counts()
         if counts:
@@ -406,7 +341,7 @@ def send_queue(directory: Path, input_file: Path | None, submit: bool,
         # Reuse one client so its request pacing applies throughout this batch.
         config = ActionBuilderConfig.from_environment()
         lookup_client = ActionBuilderLookup(config)
-        checked = held = sent = 0
+        checked = cleared = held = sent = 0
         previous_post = False
         for item, payload in prepared:
             # A prior lookup can hold related versions in this prepared batch.
@@ -423,12 +358,14 @@ def send_queue(directory: Path, input_file: Path | None, submit: bool,
             checked += 1
             print(f"Checked record: {item.path.name}")
             show_lookup_result(result)
+            # Only two successful searches with no candidates allow creation.
             if result.outcome != "not_found":
                 held += 1
                 print("Moved to review. No person was created or updated.")
                 continue
+            cleared += 1
             if check_only:
-                # A clean check stays pending. Submission will check again.
+                print("Passed email and phone checks. Kept pending for submission.")
                 continue
             # The lookup client spaces its GETs; leave a gap before the POST too.
             time.sleep(0.3)
@@ -455,23 +392,23 @@ def send_queue(directory: Path, input_file: Path | None, submit: bool,
             show_success(result)
             sent += 1
             previous_post = True
-        print(f"Checked {checked} record(s); {held} record(s) held for review.")
+        print(f"Checked {checked} record(s); {cleared} passed; {held} held for review.")
         if check_only:
-            print("GET checks only. No people were created or updated. Clear records remain pending.")
+            print("GET checks only. No people were created or updated. Use --submit to send pending records after fresh checks.")
         else:
             print(f"Successfully submitted {sent} record(s). Sent records are in: {queue.directory / 'sent'}")
         return 1 if held else 0
 
 
 def check_queue(directory: Path, input_file: Path | None = None) -> int:
-    """Check pending records with GET only, saving matches in the review folder."""
+    """Save GET evidence: unmatched records stay pending; matches move to review."""
     return send_queue(directory, input_file, submit=False, check_only=True)
 
 
 def main() -> int:
     """With no file argument, use the extractor's local pool of approved JSON."""
     parser = argparse.ArgumentParser(
-        description="Preview or send approved Action Builder records."
+        description="Preview pending records, or submit them after fresh email and phone checks."
     )
     parser.add_argument(
         "input_file",
@@ -488,7 +425,7 @@ def main() -> int:
     parser.add_argument(
         "--submit",
         action="store_true",
-        help="Actually send records. Without this option, only preview them.",
+        help="Create pending people only after fresh email and phone checks find no match. Without this option, preview only.",
     )
     arguments = parser.parse_args()
     try:
@@ -511,7 +448,7 @@ def main() -> int:
         result = ActionBuilderLookup(config).check(payload)
         show_lookup_result(result)
         if result.outcome != "not_found":
-            print("Possible existing person. Review Action Builder; nothing was created or updated.")
+            print("Manual review required. Nothing was created or updated.")
             return 1
         time.sleep(0.3)
         show_success(submit_to_actionbuilder(payload, config=config))

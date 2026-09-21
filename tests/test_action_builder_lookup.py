@@ -6,7 +6,9 @@ The POST guard makes an accidental mutation fail immediately.
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 from copy import deepcopy
+from io import StringIO
 import os
 import unittest
 from unittest.mock import Mock, patch
@@ -114,18 +116,22 @@ class LookupTests(unittest.TestCase):
     def results_by_filter(self, **people_by_field):
         def respond(url, **kwargs):
             field = kwargs["params"]["filter"].split(" eq ", 1)[0]
+            # Reproduce the observed API rejection of name filters.
+            if field not in {"email_address", "phone_number"}:
+                return response({"error": "Invalid filter"}, status=400)
             return response(collection(people_by_field.get(field, [])))
         self.get.side_effect = respond
 
-    def test_absence_requires_all_three_independent_searches(self):
+    def test_both_empty_contact_searches_clear_submission_without_querying_names(self):
         self.results_by_filter()
         result = self.client.check(self.person)
         self.assertEqual(result.outcome, "not_found")
         self.assertEqual(result.candidates, ())
+        for word in ("email", "phone", "no matches"):
+            self.assertIn(word, result.reason.lower())
         self.assertEqual([call.kwargs["params"] for call in self.get.call_args_list], [
             {"filter": "email_address eq 'morgan@example.test'", "page": 1},
             {"filter": "phone_number eq '12025550123'", "page": 1},
-            {"filter": "family_name eq 'Example'", "page": 1},
         ])
         for call in self.get.call_args_list:
             self.assertEqual(call.args, (self.config.people_url,))
@@ -135,7 +141,7 @@ class LookupTests(unittest.TestCase):
 
     def test_exact_person_is_deduplicated_across_searches(self):
         person = remote()
-        self.results_by_filter(email_address=[person], phone_number=[person], family_name=[person])
+        self.results_by_filter(email_address=[person], phone_number=[person])
         result = self.client.check(self.person)
         self.assertEqual(result.outcome, "existing")
         self.assertEqual(len(result.candidates), 1)
@@ -147,7 +153,7 @@ class LookupTests(unittest.TestCase):
                         email_addresses=[{"address": "MORGAN@EXAMPLE.TEST"}],
                         phone_numbers=[{"number": "(202) 555-0123"}])
         person["postal_addresses"][0]["address_lines"] = ["  123   SAMPLE STREET "]
-        self.results_by_filter(email_address=[person], phone_number=[person], family_name=[person])
+        self.results_by_filter(email_address=[person], phone_number=[person])
         self.assertEqual(self.client.check(self.person).outcome, "existing")
 
     def test_changed_address_or_middle_initial_needs_review(self):
@@ -158,7 +164,7 @@ class LookupTests(unittest.TestCase):
                     person["postal_addresses"][0]["address_lines"] = ["999 Previous Street"]
                 else:
                     person["additional_name"] = "B"
-                self.results_by_filter(email_address=[person], phone_number=[person], family_name=[person])
+                self.results_by_filter(email_address=[person], phone_number=[person])
                 result = self.client.check(self.person)
                 self.assertEqual(result.outcome, "needs_review")
                 self.assertIn(changed_field, result.candidates[0]["differing_fields"])
@@ -170,7 +176,7 @@ class LookupTests(unittest.TestCase):
         ]
         for field, person, mismatch in cases:
             with self.subTest(field=field):
-                self.results_by_filter(**{field: [person], "family_name": [person]})
+                self.results_by_filter(**{field: [person]})
                 result = self.client.check(self.person)
                 self.assertEqual(result.outcome, "needs_review")
                 self.assertIn(mismatch, result.candidates[0]["differing_fields"])
@@ -178,37 +184,44 @@ class LookupTests(unittest.TestCase):
     def test_email_and_phone_pointing_to_different_people_needs_review(self):
         email_person = remote(phone_numbers=[{"number": "12025550199"}])
         phone_person = remote(OTHER_ID, email_addresses=[{"address": "other@example.test"}])
-        self.results_by_filter(email_address=[email_person], phone_number=[phone_person],
-                               family_name=[email_person, phone_person])
+        self.results_by_filter(email_address=[email_person], phone_number=[phone_person])
         result = self.client.check(self.person)
         self.assertEqual(result.outcome, "needs_review")
         self.assertEqual(len(result.candidates), 2)
 
     def test_multiple_exact_people_need_review(self):
         people = [remote(), remote(OTHER_ID)]
-        self.results_by_filter(email_address=people, phone_number=people, family_name=people)
+        self.results_by_filter(email_address=people, phone_number=people)
         self.assertEqual(self.client.check(self.person).outcome, "needs_review")
 
-    def test_only_same_surname_is_not_a_person_match(self):
-        person = remote(OTHER_ID, given_name="Taylor", additional_name="B",
-                        email_addresses=[{"address": "taylor@example.test"}],
-                        phone_numbers=[{"number": "12025550199"}])
-        person["postal_addresses"][0]["address_lines"] = ["999 Other Street"]
-        self.results_by_filter(family_name=[person])
-        self.assertEqual(self.client.check(self.person).outcome, "not_found")
+    def test_exact_match_succeeds_when_server_rejects_every_name_filter(self):
+        person = remote()
+        self.results_by_filter(email_address=[person], phone_number=[person])
+        result = self.client.check(self.person)
+        self.assertEqual(result.outcome, "existing")
+        self.assertEqual(self.get.call_count, 2)
+        self.assertEqual(result.candidates[0]["identifiers"], [PERSON_ID])
 
-    def test_same_name_with_changed_contact_information_needs_review(self):
-        person = remote(email_addresses=[{"address": "old@example.test"}],
-                        phone_numbers=[{"number": "12025550199"}])
-        person["postal_addresses"][0]["address_lines"] = ["999 Old Street"]
-        self.results_by_filter(family_name=[person])
-        self.assertEqual(self.client.check(self.person).outcome, "needs_review")
+    def test_no_match_history_records_clearance_for_the_checked_destination(self):
+        self.results_by_filter()
+        result = self.client.check(self.person)
+        self.assertEqual(result.outcome, "not_found")
+        self.assertEqual(result.candidates, ())
+        history = result.as_history(self.config)
+        self.assertEqual(history["outcome"], "not_found")
+        self.assertEqual(history["candidates"], [])
+        self.assertEqual(history["destination"], self.config.destination)
+        self.assertTrue(history["checked_at"])
+        self.assertEqual(history["reason"], result.reason)
 
-    def test_same_surname_and_address_with_different_first_name_needs_review(self):
-        person = remote(given_name="Taylor", email_addresses=[{"address": "old@example.test"}],
-                        phone_numbers=[{"number": "12025550199"}])
-        self.results_by_filter(family_name=[person])
-        self.assertEqual(self.client.check(self.person).outcome, "needs_review")
+    def test_name_differences_are_compared_locally_for_contact_candidates(self):
+        for field, changed_name in (("given_name", "Taylor"), ("family_name", "Different")):
+            with self.subTest(field=field):
+                person = remote(**{field: changed_name})
+                self.results_by_filter(email_address=[person], phone_number=[person])
+                result = self.client.check(self.person)
+                self.assertEqual(result.outcome, "needs_review")
+                self.assertIn(field, result.candidates[0]["differing_fields"])
 
     def test_entity_type_missing_or_not_person_needs_review(self):
         for entity_type in (None, "Employer"):
@@ -218,7 +231,7 @@ class LookupTests(unittest.TestCase):
                     del person["action_builder:entity_type"]
                 else:
                     person["action_builder:entity_type"] = entity_type
-                self.results_by_filter(email_address=[person], phone_number=[person], family_name=[person])
+                self.results_by_filter(email_address=[person], phone_number=[person])
                 result = self.client.check(self.person)
                 self.assertEqual(result.outcome, "needs_review")
                 self.assertIn("entity_type", result.candidates[0]["differing_fields"])
@@ -229,17 +242,53 @@ class LookupTests(unittest.TestCase):
         person["postal_addresses"][0]["locality"] = "Other City"
         other_address["address_lines"] = ["999 Other Street"]
         person["postal_addresses"].append(other_address)
-        self.results_by_filter(email_address=[person], phone_number=[person], family_name=[person])
+        self.results_by_filter(email_address=[person], phone_number=[person])
         self.assertEqual(self.client.check(self.person).outcome, "needs_review")
 
     def test_result_history_contains_matching_fields_but_not_contact_values_or_token(self):
         person = remote()
-        self.results_by_filter(email_address=[person], phone_number=[person], family_name=[person])
+        self.results_by_filter(email_address=[person], phone_number=[person])
         history = self.client.check(self.person).as_history(self.config)
         self.assertEqual(history["destination"], self.config.destination)
         self.assertTrue(history["checked_at"])
         for sensitive_value in ("invented-token", "morgan@example.test", "12025550123", "123 Sample Street"):
             self.assertNotIn(sensitive_value, str(history))
+
+
+    def test_failed_phone_search_after_email_match_does_not_return_existing(self):
+        self.get.side_effect = [
+            response(collection([remote()])),
+            response({"error": "private-server-detail morgan@example.test 12025550123 invented-token"}, status=400),
+        ]
+        output = StringIO()
+        with redirect_stdout(output), self.assertRaises(lookup.LookupError) as raised:
+            self.client.check(self.person)
+        self.assertEqual(self.get.call_count, 2)
+        message = str(raised.exception)
+        self.assertIn("phone_number", message)
+        self.assertIn("page 1", message)
+        self.assertIn("HTTP 400", message)
+        self.assertEqual(output.getvalue(), "")
+        for value in ("morgan@example.test", "12025550123", "invented-token", "private-server-detail"):
+            self.assertNotIn(value, message)
+
+    def test_empty_email_search_cannot_clear_an_incomplete_phone_search(self):
+        failures = [
+            response({"error": "Invalid filter"}, status=400),
+            requests.Timeout("simulated timeout"),
+            response({"_embedded": {"osdi:people": []}}),
+            response(collection(total_pages=2)),
+        ]
+        for failure in failures:
+            with self.subTest(failure=repr(failure)):
+                self.get.reset_mock()
+                self.get.side_effect = [response(collection()), failure]
+                with self.assertRaises(lookup.LookupError):
+                    self.client.check(self.person)
+                self.assertEqual([call.kwargs["params"]["filter"] for call in self.get.call_args_list], [
+                    "email_address eq 'morgan@example.test'",
+                    "phone_number eq '12025550123'",
+                ])
 
     def test_candidate_changing_during_independent_searches_fails(self):
         changed = remote(additional_name="B")
@@ -258,7 +307,7 @@ class LookupTests(unittest.TestCase):
                                 _links={"next": {"href": "https://outside.invalid/collect-token"}})),
             response(collection([remote(OTHER_ID)], page=2, total_pages=2, per_page=1)),
         ]
-        people = self.client._search("family_name", "Example")
+        people = self.client._search("email_address", "morgan@example.test")
         self.assertEqual([person["identifiers"][0] for person in people], [PERSON_ID, OTHER_ID])
         self.assertEqual([call.kwargs["params"]["page"] for call in self.get.call_args_list], [1, 2])
         self.assertTrue(all(call.args == (self.config.people_url,) for call in self.get.call_args_list))
@@ -286,37 +335,37 @@ class LookupTests(unittest.TestCase):
             with self.subTest(document=document):
                 self.get.return_value = response(document)
                 with self.assertRaises(lookup.LookupError):
-                    self.client._search("family_name", "Example")
+                    self.client._search("email_address", "morgan@example.test")
 
     def test_changing_page_count_fails(self):
         self.get.side_effect = [response(collection([remote()], total_pages=2, per_page=1)),
                                 response(collection([remote(OTHER_ID)], page=2, total_pages=3, per_page=1))]
         with self.assertRaisesRegex(lookup.LookupError, "changed during pagination"):
-            self.client._search("family_name", "Example")
+            self.client._search("email_address", "morgan@example.test")
         self.assertEqual(self.get.call_count, 2)
 
     def test_empty_nonfinal_page_fails(self):
         self.get.side_effect = [response(collection(total_pages=2))]
         with self.assertRaises(lookup.LookupError):
-            self.client._search("family_name", "Example")
+            self.client._search("email_address", "morgan@example.test")
 
     def test_short_nonfinal_page_fails(self):
         self.get.side_effect = [response(collection([remote()], total_pages=2, per_page=25))]
         with self.assertRaises(lookup.LookupError):
-            self.client._search("family_name", "Example")
+            self.client._search("email_address", "morgan@example.test")
 
     def test_empty_final_page_after_nonempty_first_page_fails(self):
         self.get.side_effect = [response(collection([remote()], total_pages=2, per_page=1)),
                                 response(collection(page=2, total_pages=2, per_page=1))]
         with self.assertRaisesRegex(lookup.LookupError, "incomplete pages"):
-            self.client._search("family_name", "Example")
+            self.client._search("email_address", "morgan@example.test")
         self.assertEqual(self.get.call_count, 2)
 
     def test_changing_page_size_fails(self):
         self.get.side_effect = [response(collection([remote()], total_pages=2, per_page=1)),
                                 response(collection([remote(OTHER_ID)], page=2, total_pages=2, per_page=2))]
         with self.assertRaisesRegex(lookup.LookupError, "changed its page size"):
-            self.client._search("family_name", "Example")
+            self.client._search("email_address", "morgan@example.test")
         self.assertEqual(self.get.call_count, 2)
 
     def test_repeated_page_or_person_fails(self):
@@ -329,13 +378,13 @@ class LookupTests(unittest.TestCase):
                 self.get.reset_mock()
                 self.get.side_effect = [response(collection([remote()], total_pages=2, per_page=1)), response(second)]
                 with self.assertRaises(lookup.LookupError):
-                    self.client._search("family_name", "Example")
+                    self.client._search("email_address", "morgan@example.test")
                 self.assertEqual(self.get.call_count, 2)
 
     def test_next_link_after_declared_final_page_fails(self):
         self.get.side_effect = [response(collection(_links={"next": {"href": "https://example.invalid/page2"}}))]
         with self.assertRaises(lookup.LookupError):
-            self.client._search("family_name", "Example")
+            self.client._search("email_address", "morgan@example.test")
 
     def test_malformed_collections_fail(self):
         documents = [[], None, {}, {**collection(), "_embedded": []},
@@ -347,7 +396,7 @@ class LookupTests(unittest.TestCase):
             with self.subTest(document=document):
                 self.get.return_value = response(document)
                 with self.assertRaises(lookup.LookupError):
-                    self.client._search("family_name", "Example")
+                    self.client._search("email_address", "morgan@example.test")
 
     def test_malformed_people_fail_before_any_absence_decision(self):
         records = [None, [], {}, remote(identifiers=[]), remote(identifiers=["custom_id:123"]),
@@ -364,7 +413,7 @@ class LookupTests(unittest.TestCase):
             with self.subTest(person=person):
                 self.get.return_value = response(collection([person]))
                 with self.assertRaises(lookup.LookupError):
-                    self.client._search("family_name", "Example")
+                    self.client._search("email_address", "morgan@example.test")
 
     def test_http_errors_and_redirects_never_become_not_found(self):
         self.get.side_effect = None
@@ -391,14 +440,16 @@ class LookupTests(unittest.TestCase):
         with self.assertRaises(lookup.LookupError):
             self.client.check(self.person)
 
-    def test_apostrophes_are_escaped_in_odata_filter_literals(self):
+    def test_apostrophes_are_escaped_in_email_and_names_are_not_queried(self):
         self.person["person"]["family_name"] = "O'Example"
         self.person["person"]["email_addresses"][0]["address"] = "morgan.o'example@example.test"
         self.results_by_filter()
         self.assertEqual(self.client.check(self.person).outcome, "not_found")
         filters = [call.kwargs["params"]["filter"] for call in self.get.call_args_list]
-        self.assertEqual(filters[0], "email_address eq 'morgan.o''example@example.test'")
-        self.assertEqual(filters[2], "family_name eq 'O''Example'")
+        self.assertEqual(filters, [
+            "email_address eq 'morgan.o''example@example.test'",
+            "phone_number eq '12025550123'",
+        ])
 
     def test_incomplete_local_person_is_rejected_before_any_get(self):
         string_street_lines = payload()

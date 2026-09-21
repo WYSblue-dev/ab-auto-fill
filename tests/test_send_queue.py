@@ -22,8 +22,9 @@ import test_extract_person as fixture
 
 RECORD = fixture.EXPECTED
 OTHER_RECORD = {**RECORD, "given_name": "Taylor", "email": "taylor@example.test"}
-SUCCESS = {"person": {"identifiers": ["invented:person-id"]}}
+SUCCESS = {"person": {"identifiers": ["action_builder:11111111-1111-4111-8111-111111111111"]}}
 CONFIG = ActionBuilderConfig("invented-token", "invented", "invented-campaign")
+# Clearance requires both supported searches to complete without any matches.
 CLEAR = LookupResult("not_found", "No matching people found in this campaign.")
 
 
@@ -176,18 +177,18 @@ class QueuedSenderTests(unittest.TestCase):
         if queue_override:
             argv.extend(["--queue-dir", str(self.queue_dir)])
         # Mock credentials as well as transport so the real .env is not read.
-        with patch("sys.argv", argv), patch.object(send_person, "load_dotenv"), \
-                patch.object(send_person, "DEFAULT_QUEUE", self.folder / "isolated-default"), \
+        with (patch("sys.argv", argv), patch.object(send_person, "load_dotenv"),
+                patch.object(send_person, "DEFAULT_QUEUE", self.folder / "isolated-default"),
                 patch.object(send_person.ActionBuilderConfig, "from_environment", return_value=CONFIG,
-                             side_effect=credential_error), \
-                patch.object(send_person.requests, "get", side_effect=AssertionError("Real HTTP is forbidden in tests")), \
-                patch.object(send_person.requests, "post", side_effect=AssertionError("Real HTTP is forbidden in tests")), \
+                             side_effect=credential_error),
+                patch.object(send_person.requests, "get", side_effect=AssertionError("Real HTTP is forbidden in tests")),
+                patch.object(send_person.requests, "post", side_effect=AssertionError("Real HTTP is forbidden in tests")),
                 patch.object(send_person.ActionBuilderLookup, "check", side_effect=lookup_effect,
-                             return_value=CLEAR) as lookup, \
+                             return_value=CLEAR) as lookup,
                 patch.object(send_person, "submit_to_actionbuilder", side_effect=submit_effect,
-                             return_value=SUCCESS) as submit, \
-                patch.object(send_person.time, "sleep", side_effect=sleep_effect), \
-                redirect_stdout(output), redirect_stderr(errors):
+                             return_value=SUCCESS) as submit,
+                patch.object(send_person.time, "sleep", side_effect=sleep_effect),
+                redirect_stdout(output), redirect_stderr(errors)):
             result = send_person.main()
         self.last_lookup = lookup
         return result, submit, output.getvalue(), errors.getvalue()
