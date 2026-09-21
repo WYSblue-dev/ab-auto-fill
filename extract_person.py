@@ -7,7 +7,6 @@ contacts Action Builder. send_person.py still handles previewing and sending.
 
 from __future__ import annotations
 
-# These imports are from Python's standard library; they need no pip install.
 import argparse
 from dataclasses import dataclass, field
 import html
@@ -19,11 +18,9 @@ import re
 import sys
 import tempfile
 
-# pypdf is the one third-party package used in this file.
 from pypdf import PageObject, PdfReader
 from pypdf.errors import PdfReadError
 
-# Finding downloads and remembering queued records have separate jobs.
 from pdf_downloads_finder import (
     DEFAULT_DOWNLOADS,
     DEFAULT_MARKER,
@@ -112,7 +109,6 @@ FIELDS = {
     "postal_code": FieldSpec("Zip", Box(450, 556, 545, 583)),
 }
 
-# re is also standard library. fullmatch() checks the entire string.
 ZIP_PATTERN = re.compile(r"[0-9]{5}(?:-[0-9]{4})?")
 EMAIL_PATTERN = re.compile(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+")
 
@@ -140,7 +136,7 @@ STATE_CODES = set(STATE_NAMES.values())
 
 def clean_text(value: str) -> str:
     """Normalize harmless spacing without removing meaningful punctuation."""
-    # unescape converts HTML text such as &amp; to &, not bytes to characters.
+    # Decode exported HTML entities such as &amp;.
     value = html.unescape(value)
     value = value.replace(r"\@", "@")
     # split/join also handles tabs and nonbreaking spaces.
@@ -160,9 +156,7 @@ def read_page_fragments(page: PageObject) -> list[TextFragment]:
     relevant_areas.extend(field.area for field in FIELDS.values())
 
     def visit(text, cm, tm, font, font_size):
-        # pypdf calls this small function as it encounters pieces of text.
-        # tm describes text placement; cm describes enclosing transformations.
-        # Both matter: the supplied PDF scales and flips some of its text.
+        # Combine text placement (tm) with the page's scaling and flips (cm).
         x = tm[4] * cm[0] + tm[5] * cm[2] + cm[4]
         y = tm[4] * cm[1] + tm[5] * cm[3] + cm[5]
         if not text.strip() or not any(area.contains(x, y) for area in relevant_areas):
@@ -345,7 +339,6 @@ def parse_approved_person(page: PageObject) -> dict[str, str]:
 
 def extract_approved_person(pdf_path: str | Path) -> dict[str, str]:
     """Find exactly one checklist anywhere in a PDF, then read its answers."""
-    # A context manager closes the input file even if a validation error occurs.
     with Path(pdf_path).open("rb") as source:
         reader = PdfReader(source)
         if reader.is_encrypted:
@@ -680,4 +673,4 @@ def main() -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 
-# Later work: Action Builder person matching and a desktop launcher.
+# A desktop launcher is still future work.

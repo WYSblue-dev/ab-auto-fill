@@ -25,12 +25,12 @@ LOCK_NAME = ".queue.lock"
 # Folders make progress visible. The history, not the folder, decides status.
 RECORD_FOLDERS = ("pending", "sent", "review")
 STATUS_FOLDERS = {"pending": "pending", "sent": "sent", "review": "review",
-                  "sending": "review", "uncertain": "review"}
+                  "sending": "review", "uncertain": "review", "discarded": "review"}
 CONTACT_FIELDS = {
     "given_name", "family_name", "additional_name", "email", "phone",
     "address_line_1", "locality", "region", "postal_code",
 }
-STATUSES = {"pending", "review", "sending", "sent", "uncertain"}
+STATUSES = {"pending", "review", "sending", "sent", "uncertain", "discarded"}
 ATTEMPTED = {"sending", "sent", "uncertain"}
 ID_PATTERN = re.compile(r"[0-9a-f]{64}")
 
@@ -103,6 +103,8 @@ class RecordQueue:
         self.directory = Path(directory).absolute()
         self._state: dict[str, Any] | None = None
         self._lock_identity: tuple[int, int] | None = None
+        self._review_checks: set[str] = set()
+        self._needs_reopen = False
 
     def __enter__(self) -> "RecordQueue":
         if self._lock_identity is not None:
@@ -139,11 +141,11 @@ class RecordQueue:
             if state_path.exists() or state_path.is_symlink():
                 self._state = _load_json(state_path)
             else:
-                self._state = {"version": 2, "families": {}, "records": {}}
+                self._state = {"version": 3, "families": {}, "records": {}}
             # Validate every file before migration or recovery moves anything.
             self._validate(reconcile=False)
-            migrated = self._state["version"] == 1
-            self._state["version"] = 2
+            migrated = self._state["version"] != 3
+            self._state["version"] = 3
             # A crash after a claim may have happened after the server accepted it.
             recovered = False
             for entry in self._state["records"].values():
@@ -161,6 +163,8 @@ class RecordQueue:
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self._state = None
+        self._review_checks.clear()
+        self._needs_reopen = False
         if self._lock_identity is not None:
             lock = self.directory / LOCK_NAME
             try:
@@ -173,6 +177,8 @@ class RecordQueue:
     def _require_open(self) -> dict[str, Any]:
         if self._state is None or self._lock_identity is None:
             raise QueueError("Open RecordQueue with a 'with' statement before using it.")
+        if self._needs_reopen:
+            raise QueueError("A queue update failed. Close and reopen the queue before continuing.")
         return self._state
 
     def _filename(self, identifier: str) -> str:
@@ -236,13 +242,18 @@ class RecordQueue:
     def _commit(self) -> None:
         # Check first, save the status second, and move the file last.
         # A stopped rename can then be recovered using the saved status.
-        self._validate(reconcile=False)
-        self._write_json(self.directory / STATE_NAME, self._require_open())
-        self._reconcile_records()
+        try:
+            self._validate(reconcile=False)
+            self._write_json(self.directory / STATE_NAME, self._require_open())
+            self._reconcile_records()
+        except BaseException:
+            # Never reconcile unsaved in-memory decisions after a failed write.
+            self._needs_reopen = True
+            raise
 
     def _validate(self, *, reconcile: bool = True) -> None:
         state = self._require_open()
-        if not isinstance(state, dict) or set(state) != {"version", "families", "records"} or type(state["version"]) is not int or state["version"] not in {1, 2}:
+        if not isinstance(state, dict) or set(state) != {"version", "families", "records"} or type(state["version"]) is not int or state["version"] not in {1, 2, 3}:
             raise QueueError("The queue history format is unsupported or damaged.")
         families, records = state["families"], state["records"]
         if not isinstance(families, dict) or not isinstance(records, dict):
@@ -251,12 +262,15 @@ class RecordQueue:
             self._filename(identifier)
             if not isinstance(entry, dict) or not isinstance(entry.get("status"), str) or entry["status"] not in STATUSES:
                 raise QueueError("A queue record has an invalid status.")
-            if set(entry) - {"status", "created_at", "updated_at", "reason", "result", "lookup"}:
+            if set(entry) - {"status", "created_at", "updated_at", "reason", "result", "lookup", "decisions", "replacement_id"}:
                 raise QueueError("A queue record contains unexpected history fields.")
             if any(not isinstance(entry.get(key), str) for key in ("created_at", "updated_at")):
                 raise QueueError("A queue record is missing its history.")
             if "lookup" in entry:
                 self._validate_lookup(entry["lookup"])
+            self._validate_decisions(identifier, entry, records)
+            if state["version"] < 3 and (entry["status"] == "discarded" or "decisions" in entry or "replacement_id" in entry):
+                raise QueueError("Manual review history requires queue version 3.")
         referenced = set()
         for family, entry in families.items():
             if not isinstance(family, str) or not family or not isinstance(entry, dict):
@@ -324,7 +338,8 @@ class RecordQueue:
                 if digest != identifier:
                     raise QueueError("A queued record was edited. Re-extract it through the finder; do not send it.")
                 locations[identifier] = path
-        if set(locations) != set(records):
+        required = {identifier for identifier, entry in records.items() if entry["status"] != "discarded"}
+        if not required <= set(locations):
             raise QueueError("A tracked contact record is missing. Restore it before continuing.")
         return locations
 
@@ -342,9 +357,21 @@ class RecordQueue:
             locations = self._scan_records()
         self._ensure_folders()
         for identifier, source in sorted(locations.items()):
+            if self._require_open()["records"][identifier]["status"] == "discarded":
+                # The durable tombstone must exist before its contact file goes away.
+                self._remove_discarded_file(identifier, source)
+                continue
             destination = self._path(identifier)
             if source != destination:
                 self._move_record(source, destination)
+
+    def _remove_discarded_file(self, identifier: str, source: Path) -> None:
+        if source not in self._possible_paths(identifier):
+            raise QueueError("A discarded record has an invalid file location.")
+        if hashlib.sha256(_record_bytes(_load_json(source))).hexdigest() != identifier:
+            raise QueueError("A discarded file was changed. Review it before deleting anything.")
+        source.unlink()
+        self._sync_directory(source.parent)
 
     @staticmethod
     def _source_details(family: str, hashes: set[str], names: list[str]) -> None:
@@ -371,6 +398,51 @@ class RecordQueue:
         return any(records[identifier]["status"] in ATTEMPTED for identifier in family["record_ids"])
 
     @staticmethod
+    def _validate_decisions(identifier: str, entry: dict, records: dict) -> None:
+        decisions = entry.get("decisions", [])
+        if not isinstance(decisions, list) or ("decisions" in entry and not decisions):
+            raise QueueError("A record has invalid manual review decisions.")
+        for decision in decisions:
+            required = {"action", "at", "reason", "previous_status"}
+            if not isinstance(decision, dict) or not required <= set(decision):
+                raise QueueError("A manual review decision is damaged.")
+            action = decision["action"]
+            if not isinstance(action, str):
+                raise QueueError("A manual review decision has an invalid action.")
+            extra = {"related_id"} if action == "edited" else {"destination"} if action in {"checked", "approved_send"} else set()
+            if action not in {"edited", "discarded", "checked", "approved_send"} or set(decision) != required | extra:
+                raise QueueError("A manual review decision contains invalid fields.")
+            if any(not isinstance(decision[key], str) or not decision[key].strip() for key in ("at", "reason")):
+                raise QueueError("A manual review decision needs a date and explanation.")
+            if (len(decision["reason"]) > 500 or not isinstance(decision["previous_status"], str)
+                    or decision["previous_status"] not in {"review", "uncertain"}):
+                raise QueueError("A manual review decision has invalid history.")
+            if action == "edited" and (not isinstance(decision["related_id"], str)
+                                        or decision["related_id"] not in records or decision["related_id"] == identifier):
+                raise QueueError("An edited record is missing its replacement.")
+            if action in {"checked", "approved_send"}:
+                RecordQueue._validate_destination(decision["destination"])
+        replacement = entry.get("replacement_id")
+        if "replacement_id" in entry and (not isinstance(replacement, str) or replacement not in records or replacement == identifier):
+            raise QueueError("A record has an invalid replacement link.")
+        if entry["status"] == "discarded":
+            if not decisions or decisions[-1]["action"] not in {"edited", "discarded"}:
+                raise QueueError("A discarded record is missing its review decision.")
+            if decisions[-1]["action"] == "edited":
+                if replacement != decisions[-1]["related_id"]:
+                    raise QueueError("An edited record has conflicting replacement history.")
+            elif replacement is not None:
+                raise QueueError("A discarded record has an unexpected replacement.")
+        elif replacement is not None or (decisions and decisions[-1]["action"] in {"edited", "discarded"}):
+            raise QueueError("A retired record cannot become active again.")
+
+    @staticmethod
+    def _validate_destination(destination: Any) -> None:
+        if (not isinstance(destination, dict) or set(destination) != {"subdomain", "campaign_id"}
+                or any(not isinstance(value, str) or not value.strip() for value in destination.values())):
+            raise QueueError("An Action Builder lookup is missing its destination.")
+
+    @staticmethod
     def _validate_lookup(lookup: Any) -> None:
         """Keep a small, understandable receipt for the read-only API check."""
         if not isinstance(lookup, dict) or set(lookup) != {
@@ -382,10 +454,7 @@ class RecordQueue:
         if any(not isinstance(lookup[key], str) or not lookup[key].strip()
                for key in ("reason", "checked_at")):
             raise QueueError("An Action Builder lookup is missing its explanation or date.")
-        destination = lookup["destination"]
-        if (not isinstance(destination, dict) or set(destination) != {"subdomain", "campaign_id"}
-                or any(not isinstance(value, str) or not value.strip() for value in destination.values())):
-            raise QueueError("An Action Builder lookup is missing its destination.")
+        RecordQueue._validate_destination(lookup["destination"])
         candidates = lookup["candidates"]
         if not isinstance(candidates, list):
             raise QueueError("An Action Builder lookup has invalid matching records.")
@@ -402,23 +471,18 @@ class RecordQueue:
                 raise QueueError("An Action Builder match is missing its identifier.")
         if lookup["outcome"] == "not_found" and candidates:
             raise QueueError("A lookup cannot report no match while containing matching people.")
-        if lookup["outcome"] != "not_found" and not candidates:
+        # Keep older empty-candidate review holds readable; never release them here.
+        if lookup["outcome"] == "existing" and not candidates:
             raise QueueError("An existing-person lookup is missing its matching people.")
         if lookup["outcome"] == "existing" and (
             len(candidates) != 1 or candidates[0]["differing_fields"]
         ):
             raise QueueError("An exact existing-person lookup has conflicting matching details.")
 
-    def _lookup_held(self, family: dict[str, Any]) -> bool:
-        """PDF resolution cannot clear a possible existing-person match.
-
-        Identical records can connect several filename groups. Follow those
-        connections so choosing a different filename or version cannot bypass
-        a hold. A new GET check is required before any future POST; a saved
-        'not_found' receipt is never permanent permission to create someone.
-        """
+    def _related_ids(self, record_ids: list[str]) -> set[str]:
+        """Follow identical records shared across differently named downloads."""
         state = self._require_open()
-        related_ids = set(family["record_ids"])
+        related_ids = set(record_ids)
         unchecked = list(state["families"].values())
         changed = True
         while changed:
@@ -431,6 +495,22 @@ class RecordQueue:
                 else:
                     remaining.append(related_family)
             unchecked = remaining
+        return related_ids
+
+    def _manual_held(self, family: dict[str, Any]) -> bool:
+        records = self._require_open()["records"]
+        return any(records[identifier].get("decisions") for identifier in self._related_ids(family["record_ids"]))
+
+    def _lookup_held(self, family: dict[str, Any]) -> bool:
+        """PDF resolution cannot clear an unresolved API precheck.
+
+        Identical records can connect several filename groups. Follow those
+        connections so choosing a different filename or version cannot bypass
+        a hold. A new GET check is required before any future POST; a saved
+        'not_found' receipt is never permanent permission to create someone.
+        """
+        state = self._require_open()
+        related_ids = self._related_ids(family["record_ids"])
         return any(state["records"][identifier].get("lookup", {}).get("outcome")
                    in {"existing", "needs_review"} for identifier in related_ids)
 
@@ -440,10 +520,18 @@ class RecordQueue:
                   if entry["current_id"] == identifier]
         return bool(owners) and all(not entry["review"] and not entry["deferred"]
                                    and not self._attempted(entry) and not self._lookup_held(entry)
+                                   and not self._manual_held(entry)
                                    for entry in owners)
 
+    def _hold_related(self, identifier: str, reason: str) -> None:
+        related = self._related_ids([identifier])
+        for family in self._require_open()["families"].values():
+            if related.intersection(family["record_ids"]):
+                self._revoke(family)
+                family.update(review=True, deferred=False, reason=reason[:500])
+
     def _hold_lookup_families(self, reason: str) -> None:
-        """Apply a remote match hold to every connected filename group."""
+        """Apply an API review hold to every connected filename group."""
         for family in self._require_open()["families"].values():
             if self._lookup_held(family):
                 self._revoke(family)
@@ -465,6 +553,9 @@ class RecordQueue:
         entry = self._require_open()["families"].get(family)
         if entry is None:
             return None
+        current = self._require_open()["records"].get(entry["current_id"], {})
+        if current.get("status") in {"sent", "discarded"}:
+            return current["status"]
         if entry["review"]:
             return "review"
         if entry["deferred"]:
@@ -523,9 +614,20 @@ class RecordQueue:
             entry["record_ids"].append(digest)
         current = records[digest]
 
-        # Once any version was attempted, resolving a changed file cannot create
-        # another person. An operator must reconcile it with Action Builder.
-        if self._lookup_held(entry):
+        if current["status"] == "discarded":
+            # A discarded hash is a tombstone, even under a new filename.
+            if entry["current_id"] is None:
+                entry["current_id"] = digest
+            self._hold_related(digest, "A related record was discarded or replaced during manual review.")
+            self._commit()
+            return "unchanged"
+
+        # Choosing a PDF cannot clear an API hold or erase an earlier send attempt.
+        if self._manual_held(entry):
+            self._hold_related(digest, "Related records have manual review history. Use the review command.")
+            entry["current_id"] = digest
+            outcome = "already_sent" if current["status"] == "sent" else "review"
+        elif self._lookup_held(entry):
             # This new version may connect two previously separate groups.
             self._hold_lookup_families("A related record may already exist in Action Builder. Review its lookup history.")
             entry.update(current_id=digest, review=True,
@@ -569,6 +671,149 @@ class RecordQueue:
                 result.append(QueueItem(identifier, self._path(identifier), family))
         return sorted(result, key=lambda item: (item.family, item.id))
 
+    def review_records(self) -> list[QueueItem]:
+        """Return each held contact once, including uncertain send attempts."""
+        self._validate()
+        state = self._require_open()
+        result = []
+        for identifier, entry in state["records"].items():
+            if entry["status"] not in {"review", "uncertain"}:
+                continue
+            owners = sorted(name for name, family in state["families"].items()
+                            if identifier in family["record_ids"])
+            result.append(QueueItem(identifier, self._path(identifier), owners[0]))
+        return sorted(result, key=lambda item: (item.family, item.id))
+
+    def review_details(self, item: QueueItem) -> dict[str, Any]:
+        """Explain a hold without exposing unrelated records or stored secrets."""
+        self._validate()
+        entry = self._entry_for(item)
+        state = self._require_open()
+        related = self._related_ids([item.id])
+        families = {name: family for name, family in state["families"].items()
+                    if related.intersection(family["record_ids"])}
+        records = [state["records"][identifier] for identifier in related]
+        reasons = sorted({family["reason"] for family in families.values() if family["reason"]})
+        return {
+            "status": entry["status"],
+            "reason": entry.get("reason") or "; ".join(reasons) or "This record needs manual review.",
+            "lookup": json.loads(json.dumps(entry.get("lookup"))),
+            "source_names": sorted({name for family in families.values() for name in family["source_names"]}),
+            "families": sorted(families),
+            "related_sent": any(record["status"] == "sent" or "result" in record for record in records),
+            "related_uncertain": any(record["status"] in {"sending", "uncertain"}
+                                     or any(decision["previous_status"] == "uncertain"
+                                            for decision in record.get("decisions", []))
+                                     for record in records),
+        }
+
+    @staticmethod
+    def _review_reason(reason: str) -> str:
+        if not isinstance(reason, str) or not reason.strip():
+            raise QueueError("A manual review decision needs an explanation.")
+        return reason.strip()[:500]
+
+    @staticmethod
+    def _require_review(entry: dict) -> None:
+        if entry["status"] not in {"review", "uncertain"}:
+            raise QueueError("This record is no longer awaiting manual review.")
+
+    def save_review_edit(self, item: QueueItem, record: dict[str, Any]) -> QueueItem:
+        """Replace a reviewed contact with a new hash, preserving its old hold."""
+        self._validate()
+        entry = self._entry_for(item)
+        self._require_review(entry)
+        digest = hashlib.sha256(_record_bytes(record)).hexdigest()
+        if digest == item.id:
+            return QueueItem(item.id, self._path(item.id), item.family)
+        state = self._require_open()
+        if digest in state["records"] or any(path.exists() or path.is_symlink() for path in self._possible_paths(digest)):
+            raise QueueError("Those details already exist in queue history; cannot overwrite or restore that record here.")
+        # Write the replacement first. A failed history save never loses the old contact.
+        self._write_json(self._path(digest, "review"), record)
+        timestamp = _now()
+        state["records"][digest] = {
+            "status": "review", "created_at": timestamp, "updated_at": timestamp,
+            "reason": "Contact details were edited during manual review. Review the corrected record before sending.",
+        }
+        entry.setdefault("decisions", []).append({
+            "action": "edited", "at": timestamp, "reason": "Contact details corrected during manual review.",
+            "previous_status": entry["status"], "related_id": digest,
+        })
+        entry.update(status="discarded", replacement_id=digest, updated_at=timestamp,
+                     reason="Replaced by a corrected record during manual review.")
+        for family in state["families"].values():
+            if item.id in family["record_ids"]:
+                family["record_ids"].append(digest)
+                if family["current_id"] == item.id:
+                    family["current_id"] = digest
+        self._review_checks.discard(item.id)
+        self._hold_related(digest, "A related record was edited during manual review. Review before sending.")
+        self._commit()
+        return QueueItem(digest, self._path(digest), item.family)
+
+    def discard_review(self, item: QueueItem, reason: str) -> None:
+        """Save a permanent disposition before deleting the managed contact file."""
+        self._validate()
+        entry = self._entry_for(item)
+        reason = self._review_reason(reason)
+        if entry["status"] == "discarded":
+            return
+        self._require_review(entry)
+        timestamp = _now()
+        entry.setdefault("decisions", []).append({
+            "action": "discarded", "at": timestamp, "reason": reason,
+            "previous_status": entry["status"],
+        })
+        entry.update(status="discarded", updated_at=timestamp, reason=reason)
+        self._review_checks.discard(item.id)
+        self._hold_related(item.id, "A related record was discarded during manual review.")
+        self._commit()
+
+    def record_review_lookup(self, item: QueueItem, lookup: dict[str, Any]) -> None:
+        """Save a fresh GET result without releasing the manual review hold."""
+        self._validate()
+        self._review_checks.discard(item.id)
+        self._validate_lookup(lookup)
+        entry = self._entry_for(item)
+        self._require_review(entry)
+        timestamp = _now()
+        entry.update(lookup=json.loads(json.dumps(lookup)), updated_at=timestamp)
+        entry.setdefault("decisions", []).append({
+            "action": "checked", "at": timestamp, "reason": "Refreshed API lookup; manual review is still required.",
+            "previous_status": entry["status"], "destination": dict(lookup["destination"]),
+        })
+        self._hold_related(item.id, "Manual review is still required after this Action Builder check.")
+        self._commit()
+        self._review_checks.add(item.id)
+
+    def begin_review_send(self, item: QueueItem, *, config_destination: dict[str, str], reason: str) -> None:
+        """Claim one explicitly approved send; connected alternatives stay held."""
+        self._validate()
+        entry = self._entry_for(item)
+        self._require_review(entry)
+        reason = self._review_reason(reason)
+        self._validate_destination(config_destination)
+        if self.review_details(item)["related_sent"]:
+            raise QueueError("A related record was already sent. Do not create this person again.")
+        if any(self._require_open()["records"][identifier]["status"] == "sending"
+               for identifier in self._related_ids([item.id])):
+            raise QueueError("A related send is still in progress. Wait for its recorded outcome.")
+        if item.id not in self._review_checks or entry.get("lookup", {}).get("destination") != config_destination:
+            raise QueueError("Run a fresh review lookup for this destination before approving a send.")
+        timestamp = _now()
+        entry.setdefault("decisions", []).append({
+            "action": "approved_send", "at": timestamp, "reason": reason,
+            "previous_status": entry["status"], "destination": dict(config_destination),
+        })
+        self._hold_related(item.id, "A related record was manually approved for sending. Check its history.")
+        for family in self._require_open()["families"].values():
+            if item.id in family["record_ids"]:
+                family["current_id"] = item.id
+        entry.update(status="sending", updated_at=timestamp, reason="Manually approved for one submission.")
+        self._review_checks.discard(item.id)
+        self._commit()
+
     def item_for_path(self, path: str | Path) -> QueueItem:
         """Explicitly naming a queue file must not bypass its sending history."""
         candidate = Path(path).resolve()
@@ -601,7 +846,7 @@ class RecordQueue:
         self._commit()
 
     def record_lookup(self, item: QueueItem, lookup: dict[str, Any]) -> None:
-        """Save a GET result, holding possible matches without claiming a POST."""
+        """Save GET evidence; keep not_found pending and hold review outcomes."""
         self._validate()
         self._validate_lookup(lookup)
         entry = self._entry_for(item)
@@ -610,7 +855,7 @@ class RecordQueue:
         # Copy the receipt so later caller changes cannot alter queue history.
         entry.update(lookup=json.loads(json.dumps(lookup)), updated_at=_now())
         if lookup["outcome"] != "not_found":
-            # Keep every connected version on hold, including filename aliases.
+            # Keep every unresolved version on hold, including filename aliases.
             self._hold_lookup_families(lookup["reason"])
             entry.update(status="review", reason=lookup["reason"][:500])
         self._commit()
