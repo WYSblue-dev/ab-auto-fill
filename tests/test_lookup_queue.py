@@ -85,7 +85,7 @@ class LookupQueueTests(unittest.TestCase):
                 submit.assert_not_called()
                 self.assertIn(IDENTIFIER, output)
                 if result is AMBIGUOUS:
-                    self.assertIn("Fields to review: phone", output)
+                    self.assertIn("Different or missing fields: Phone", output)
                 with RecordQueue(self.queue_dir) as queue:
                     self.assertEqual(queue.pending_records(), [])
                     self.assertEqual(queue.status_for(item.family), "review")

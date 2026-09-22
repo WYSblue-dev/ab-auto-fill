@@ -190,7 +190,7 @@ Both GET and POST now use one checked configuration object. The subdomain must b
 
 **Type:** design gap; before multi-campaign use.
 
-**Read:** `ActionBuilderConfig.destination` at `action_builder_lookup.py:104`, `send_queue()` at `send_person.py:295`, `RecordQueue.record_lookup()` at `record_queue.py:848`, and `finish_send()` at `record_queue.py:863`.
+**Read:** `ActionBuilderConfig.destination` at `action_builder_lookup.py:104`, `send_queue()` at `send_person.py:320`, `RecordQueue.record_lookup()` at `record_queue.py:848`, and `finish_send()` at `record_queue.py:863`.
 
 Each new lookup receipt records its subdomain and campaign, but the queue as a whole is not bound to that destination. Changing settings leaves previously sent records suppressed and API-held records blocked by the same history, while remaining pending records are checked against the new destination. Lookup evidence records where a check happened; it does not implement a queue destination-migration policy.
 
@@ -210,7 +210,7 @@ Discard decisions are saved before their JSON is removed. Reopening can finish a
 
 **Type:** intentional compatibility path; decide whether to expose it to everyday users.
 
-**Read:** `load_approved_person()` at `send_person.py:47`, `build_actionbuilder_payload()` at `send_person.py:74`, and `main()` at `send_person.py:408`.
+**Read:** `load_approved_person()` at `send_person.py:47`, `build_actionbuilder_payload()` at `send_person.py:74`, and `main()` at `send_person.py:436`.
 
 An ordinary JSON file outside a managed queue is allowed through the older standalone workflow. In the original review, sending that file twice made two mocked POSTs and created no queue history. The new standalone submission path requires a fresh lookup before each POST; it still has no durable send-attempt history or recovery claim. Managed generated filenames have extra protections, but copying and renaming one into an ordinary standalone file crosses that boundary.
 
@@ -590,12 +590,12 @@ The sender reads contact JSON. It does not import the PDF finder or extractor to
 | `require_string()` | 59 | Requires one nonblank string; does not validate its meaning |
 | `build_actionbuilder_payload()` | 74 | Maps the flat local record to a nested request without file/network access |
 | `submit_to_actionbuilder()` | 191 | Uses shared validated configuration, performs one POST, and requires a returned person with one valid native Action Builder UUID |
-| `show_success()` | 249 | Prints a success message and returned identifier/URL; does not establish success itself |
-| `show_lookup_result()` | 266 | Prints the decision, candidate IDs, and differing field names; does not print remote contact values |
-| `queue_for_input()` | 275 | Distinguishes managed queue paths from ordinary standalone JSON |
-| `send_queue()` | 295 | Locks and validates the queue, prepares the batch, then previews, checks only, or checks and sends |
-| `check_queue()` | 403 | Calls the queue workflow with `check_only=True`; no POST path is taken |
-| `main()` | 408 | Parses arguments and selects managed or standalone workflow; standalone submission also performs a fresh lookup |
+| `show_success()` | 249 | Prints a success message, the native `action_builder:` person ID, and a returned browser URL if present; does not establish success itself |
+| `show_lookup_result()` | 265 | Separates saved/fresh decisions and numbered candidates; translates matching/differing field names into readable labels without printing remote contact values |
+| `queue_for_input()` | 300 | Distinguishes managed queue paths from ordinary standalone JSON |
+| `send_queue()` | 320 | Locks and validates the queue, prepares the batch, then previews, checks only, or checks and sends |
+| `check_queue()` | 431 | Calls the queue workflow with `check_only=True`; no POST path is taken |
+| `main()` | 436 | Parses arguments and selects managed or standalone workflow; standalone submission also performs a fresh lookup |
 
 The GET stage is executed code, not only a comment. The low-level POST helper is not the operator entry point: normal CLI submissions pass through the lookup gate. `submit_to_actionbuilder()` itself does not perform a lookup, and `RecordQueue.begin_send()` does not independently require or age-check a lookup receipt. The ordering guarantee is implemented by `send_queue()`, not enforced by every lower-level function. A future launcher or service must call the coordinated workflow rather than calling the POST helper directly.
 
@@ -738,7 +738,11 @@ Run `.venv/bin/python review_person.py` from the project folder, or add `--queue
 
 `run_review()` opens the queue and holds its lock throughout the interaction. It takes a sorted snapshot of unique held contacts, including uncertain attempts. Before displaying each next item, it checks whether that item is still reviewable, because an earlier decision may have replaced or retired it. A second cooperating process cannot extract or send through this same queue while the review is open.
 
-For each person, the command displays all nine local contact values, source filenames, the hold reason, saved candidate IDs, and differing field names. It also warns about related successful or uncertain attempts. Source names can include connected historical filenames, not only the PDF that produced the currently shown values. Remote candidate contact values are not dumped into the terminal; use the IDs to inspect those people in Action Builder.
+For each person, the command displays spaced sections for all nine local contact values, the hold reason, source filenames, and saved Action Builder evidence. Names, email/phone, and the address are grouped separately, and field labels align the values. It also warns about related successful or uncertain attempts. Source names can include connected historical filenames, not only the PDF that produced the currently shown values.
+
+`show_review()` calls the shared `show_lookup_result(..., saved=True)` renderer for the saved receipt, then displays its timestamp and destination. Fresh searches use the renderer's default fresh heading. Numbered candidate blocks show the native remote person ID, readable matching-field labels, and **Different or missing fields**: a failed comparison can mean different data or absent remote data. With no differences, the block says that all compared fields match. Candidate values and names are not stored in the receipt or fetched for this display; inspect the existing people in Action Builder using their IDs. A saved result describes the local details at the time of that check and does not release the review hold.
+
+The batch lookup output likewise identifies the local person by name and labels the hash filename **Local queue file**, keeping it separate from the **Action Builder person ID**. Successful submission output selects the native `action_builder:` identifier as **Created person ID**, even if a custom identifier precedes it in the response. These presentation changes leave lookup decisions, queue transitions, and sending confirmations unchanged.
 
 The initial question asks whether the operator has checked the person in Action Builder and against the paperwork. Answering no still permits local editing, keeping, or quitting. Sending and discarding require an affirmative check. The action menu supports:
 
@@ -836,7 +840,9 @@ The sender returns 0 after ordinary preview or a run with no newly held records,
 
 ## 13. What the tests establish
 
-**Current implementation: 207 tests passed after the interactive-review and response-validation changes on September 21, 2026, in 2.071 seconds on Python 3.14.7.** The rerun used `.venv/bin/python -B -m unittest discover -s tests`; add `-v` as below to see individual test names. The earlier email/phone implementation had 160 tests; this revision adds 23 review-queue, 20 interactive CLI, and 4 submission-receipt tests. The checks used invented data, temporary queues, and mocked HTTP; no real `.env` credentials, production queue, or live Action Builder requests were used.
+**Recorded full-suite run before the terminal-formatting update: 207 tests passed after the interactive-review and response-validation changes on September 21, 2026, in 2.071 seconds on Python 3.14.7.** The rerun used `.venv/bin/python -B -m unittest discover -s tests`; add `-v` as below to see individual test names. The earlier email/phone implementation had 160 tests; the interactive-review revision added 23 review-queue, 20 interactive CLI, and 4 submission-receipt tests. The checks used invented data, temporary queues, and mocked HTTP; no real `.env` credentials, production queue, or live Action Builder requests were used.
+
+**Terminal-readability validation:** the same 207-test suite passed after the display changes in 1.670 seconds. Terminal output was also inspected using invented data, including a successful response whose custom identifier precedes the native Action Builder ID. These checks used no live queue or network requests.
 
 ```sh
 .venv/bin/python -B -m unittest discover -s tests -v
@@ -990,10 +996,10 @@ action_builder_lookup.py
 47e60f094162e71a860511d5d2d4a50e7c4f3a8dedc6a6e15b78a88b83ff0ae8
 
 send_person.py
-5050ee93e88f9a7c42cb64c3ef20f1065c1b0caaac6955c6d03273860002b145
+ba67fdbecac65d7353e152b2481f8348ab596b5ca0c616d70419dc40933eb169
 
 review_person.py
-67cb02fc967a3262117c8581275cb34b854caea408581d3bd2bed9dcb766e367
+e8dad4bb3a44d7db93899356ef0c69b54881af051ed59087192ff566e141eb08
 ```
 
 After code changes, rerun the relevant regressions and update affected explanations, function locations, and fingerprints. A changed comment does not implement new behavior. A changed parser also does not automatically rebuild records whose source hashes are already remembered; that needs a deliberate migration/reprocessing policy.
