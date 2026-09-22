@@ -10,7 +10,7 @@ from typing import Any
 
 import requests
 
-from action_builder_lookup import ActionBuilderConfig, ActionBuilderLookup
+from action_builder_lookup import ActionBuilderConfig, ActionBuilderLookup, LookupResult
 from extract_person import (
     clean_text,
     normalize_email,
@@ -44,7 +44,7 @@ REVIEW_FIELDS = (
 def confirm(prompt: str) -> bool:
     """Only an explicit yes permits a send, override, or deletion."""
     while True:
-        answer = input(f"{prompt} [y/N]: ").strip().casefold()
+        answer = input(f"\n{prompt} [y/N]: ").strip().casefold()
         if answer in {"y", "yes"}:
             return True
         if answer in {"", "n", "no"}:
@@ -92,24 +92,38 @@ def normalize_review_record(record: dict[str, Any]) -> dict[str, str]:
 
 def show_person(record: dict[str, Any]) -> None:
     for field, label in REVIEW_FIELDS:
-        print(f"  {label}: {record[field]}")
+        if field in {"email", "address_line_1"}:
+            print()
+        print(f"  {label + ':':<16} {record[field]}")
 
 
 def show_review(queue: RecordQueue, item: QueueItem, record: dict[str, Any]) -> None:
     details = queue.review_details(item)
-    print(f"\nReviewing: {record['given_name']} {record['family_name']}")
-    print(f"Status: {details['status']}")
-    print(f"Reason: {details['reason']}")
-    for source in details["source_names"]:
-        print(f"Source PDF: {source}")
+    print("\n" + "=" * 64)
+    print(f"Reviewing: {record['given_name']} {record['family_name']}")
+    print("=" * 64)
+    print("\nLocal contact details\n")
     show_person(record)
+    status = {"review": "Needs manual review", "uncertain": "Previous submission needs checking"}
+    print("\nWhy this record is held\n")
+    print(f"  Status: {status.get(details['status'], details['status'])}")
+    print(f"  Reason: {details['reason']}")
+    print("\nSource PDFs\n")
+    for source in details["source_names"]:
+        print(f"  {source}")
     lookup = details.get("lookup")
     if lookup:
-        print(f"Saved lookup: {lookup['reason']}")
-        for candidate in lookup.get("candidates", []):
-            print("Candidate identifier(s): " + ", ".join(candidate["identifiers"]))
-            if candidate["differing_fields"]:
-                print("Fields to review: " + ", ".join(candidate["differing_fields"]))
+        show_lookup_result(
+            LookupResult(lookup["outcome"], lookup["reason"], tuple(lookup["candidates"])),
+            saved=True,
+        )
+        destination = lookup["destination"]
+        print(f"  Saved check time: {lookup['checked_at']}")
+        print(f"  Organization: {destination['subdomain']}.actionbuilder.org")
+        print(f"  Campaign ID: {destination['campaign_id']}")
+    else:
+        print("\nAction Builder lookup\n\n  No saved lookup is available for these local details.")
+    print()
     if details["related_sent"]:
         print("A related record was already sent. Creating another person here is blocked.")
     elif details["related_uncertain"]:
@@ -121,11 +135,13 @@ def edit_record(
 ) -> tuple[QueueItem, dict[str, str]]:
     """Collect corrections, validate, and let the queue replace the hashed record."""
     edited = dict(record)
+    print("\nEdit local contact details")
     print("Edits change the local contact record, not the source PDF or an existing Action Builder person.")
     while True:
+        print()
         for number, (field, label) in enumerate(REVIEW_FIELDS, start=1):
-            print(f"  {number}. {label}: {edited[field]}")
-        selection = input("Field number to change (Enter or done to finish): ").strip().casefold()
+            print(f"  {number}. {label + ':':<16} {edited[field]}")
+        selection = input("\nField number to change (Enter or done to finish): ").strip().casefold()
         if selection in {"", "done"}:
             try:
                 normalized = normalize_review_record(edited)
@@ -142,7 +158,7 @@ def edit_record(
             print("Choose a field number from 1 to 9, or press Enter to finish.")
             continue
         field, label = REVIEW_FIELDS[int(selection) - 1]
-        print(f"Old {label}: {edited[field]}")
+        print(f"\nOld {label}: {edited[field]}")
         while True:
             replacement = input("New value (Enter keeps the old value): ")
             if not replacement.strip():
@@ -168,7 +184,7 @@ def review_send(
     normalize_review_record(record)
     payload = build_actionbuilder_payload(record)
     config = ActionBuilderConfig.from_environment()
-    print(f"Checking {config.subdomain}.actionbuilder.org, campaign {config.campaign_id}...")
+    print(f"\nChecking {config.subdomain}.actionbuilder.org, campaign {config.campaign_id}...")
     result = ActionBuilderLookup(config).check(payload)
     queue.record_review_lookup(item, result.as_history(config))
     show_lookup_result(result)
@@ -189,7 +205,7 @@ def review_send(
 
     reason = "Manual review approved creation after fresh email and phone searches found no matches."
     if result.candidates or details["related_uncertain"]:
-        reason = input("Reason for approving creation despite this warning (required; Enter cancels): ").strip()
+        reason = input("\nReason for approving creation despite this warning (required; Enter cancels): ").strip()
         if not reason:
             print("Kept for review. Approval needs a reason.")
             return False
@@ -234,7 +250,8 @@ def run_review(directory: Path) -> int:
         if not items:
             print("No contact records need manual review.")
             return 0
-        print(f"{len(items)} record(s) need review. Enter keeps a record; no sending or deletion is automatic.")
+        print(f"\n{len(items)} record(s) need review.")
+        print("Enter keeps a record; no sending or deletion is automatic.")
         for original in items:
             # Earlier decisions can retire a related version from this snapshot.
             current = {item.id: item for item in queue.review_records()}
@@ -245,7 +262,13 @@ def run_review(directory: Path) -> int:
             show_review(queue, item, record)
             checked = confirm("Have you checked this person in Action Builder and the paperwork?")
             while True:
-                action = input("Action: [s]end, [c]hange, [k]eep, [d]iscard, [q]uit [keep]: ").strip().casefold()
+                print("\nChoose an action\n")
+                print("  s  Send after checks and confirmation")
+                print("  c  Change local contact details")
+                print("  k  Keep for later review")
+                print("  d  Discard this local record")
+                print("  q  Quit this review session")
+                action = input("\nAction [keep]: ").strip().casefold()
                 if action in {"q", "quit"}:
                     print("Review stopped. Unfinished records remain held.")
                     return 0
@@ -281,7 +304,7 @@ def run_review(directory: Path) -> int:
                         print("Kept for later review.")
                     break
                 print("Choose send, change, keep, discard, or quit.")
-        print("Review pass complete. Any records kept for later remain held.")
+        print("\nReview pass complete. Any records kept for later remain held.")
         return 0
 
 

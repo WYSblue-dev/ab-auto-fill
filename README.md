@@ -284,7 +284,9 @@ Run extraction again after new or corrected PDFs arrive, then preview before sub
 
 For a custom queue, add `--queue-dir "/full/path/to/composed_info"`. On Windows, use `.\.venv\Scripts\python.exe review_person.py`.
 
-The command shows each person's nine contact fields, source filenames, review reason, and any saved candidate IDs. Check the paperwork and Action Builder before choosing to send. You can:
+The command separates the local contact details, reason for review, source PDFs, and Action Builder results into spaced sections. A **Saved Action Builder lookup** shows an earlier check and its time and campaign; a **Fresh Action Builder lookup** comes from searches just performed. Each possible match has its own numbered block with an **Action Builder person ID**, matching fields, and **different or missing fields**. Those differences can mean a value differs or is absent in Action Builder. The blocks summarize comparisons rather than showing the existing person's contact values; use the IDs to inspect those people in Action Builder.
+
+Check the paperwork and Action Builder before choosing to send. You can:
 
 - **Change:** select a field, see its old value, and type the replacement. Blank input keeps the existing value. Invalid values are rejected. The completed changes are saved and the whole person is displayed again before you are asked about sending.
 - **Send:** perform fresh email/phone searches, show the result, and ask for final confirmation. If candidates still appear, you must explicitly confirm that they are different people before authorizing creation. A previous uncertain attempt also requires checking that it did not already create this person.
@@ -295,6 +297,8 @@ The command shows each person's nine contact fields, source filenames, review re
 Reading, changing, keeping, and discarding require no API key and make no API calls. Sending requires the normal `.env` settings. Blank confirmations default to **No**. The command holds the queue lock during the session, so close it before running extraction or sending in another terminal.
 
 Changes affect the local contact only; they do not update an existing Action Builder person. A reviewed submission creates a person and records the decision. A related record already marked sent blocks another creation. A failed lookup prevents sending; an uncertain POST stops the session and retains the hold.
+
+After a successful submission, **Created person ID** is the native `action_builder:` identifier. **Local queue file** identifies a file on this computer, not an Action Builder person.
 
 The command can only display records for which a contact JSON exists. If PDF extraction failed before producing one, correct or resolve the source PDF first. Discarded records and old versions replaced during editing stay in history but no longer have a review file. Do not restore them by editing the history manually.
 

@@ -248,28 +248,53 @@ def submit_to_actionbuilder(
 
 def show_success(result: dict[str, Any]) -> None:
     """Show a short receipt without dumping the entire API response."""
-    print("Action Builder submission succeeded.")
+    print("\nAction Builder submission succeeded.\n")
     person = result.get("person", {})
     if not isinstance(person, dict):
         return
     identifiers = person.get("identifiers", [])
-    if (
-        isinstance(identifiers, list)
-        and identifiers
-        and isinstance(identifiers[0], str)
-    ):
-        print(f"Identifier: {identifiers[0]}")
+    if isinstance(identifiers, list):
+        for identifier in identifiers:
+            if isinstance(identifier, str) and identifier.startswith("action_builder:"):
+                print(f"  Created person ID: {identifier}")
     if isinstance(person.get("browser_url"), str):
-        print(f"Action Builder record: {person['browser_url']}")
+        print(f"  Open in Action Builder: {person['browser_url']}")
+    print()
 
 
-def show_lookup_result(result: LookupResult) -> None:
+def show_lookup_result(result: LookupResult, *, saved: bool = False) -> None:
     """Show IDs and differing field names, without dumping remote contact data."""
-    print(f"Action Builder lookup: {result.reason}")
-    for candidate in result.candidates:
-        print("Candidate identifier(s): " + ", ".join(candidate["identifiers"]))
-        if candidate["differing_fields"]:
-            print("Fields to review: " + ", ".join(candidate["differing_fields"]))
+    field_labels = {
+        "given_name": "First name",
+        "family_name": "Last name",
+        "additional_name": "Middle initial",
+        "email": "Email",
+        "phone": "Phone",
+        "address_line_1": "Street address",
+        "locality": "City",
+        "region": "State",
+        "postal_code": "ZIP code",
+        "entity_type": "Record type (Person)",
+    }
+    heading = "Saved Action Builder lookup" if saved else "Fresh Action Builder lookup"
+    print(f"\n{heading}\n")
+    print(f"  Result: {result.reason}")
+    if saved:
+        print("  This is an earlier check; sending will run fresh searches.")
+    if result.candidates:
+        print("\n  Check these existing records in Action Builder to confirm who they belong to.")
+        print("  Comparisons below use the local details at the time of the check.")
+    elif saved:
+        print("  No candidate IDs were saved. This result does not release the review hold.")
+    for number, candidate in enumerate(result.candidates, start=1):
+        print(f"\n  Possible match {number} of {len(result.candidates)} in Action Builder")
+        for identifier in candidate["identifiers"]:
+            print(f"    Action Builder person ID: {identifier}")
+        matching = ", ".join(field_labels.get(field, field) for field in candidate["matching_fields"])
+        differing = ", ".join(field_labels.get(field, field) for field in candidate["differing_fields"])
+        print(f"    Matching fields: {matching or 'None recorded'}")
+        print(f"    Different or missing fields: {differing or 'None; all compared fields match'}")
+    print()
 
 
 def queue_for_input(input_file: Path, configured_queue: Path) -> Path | None:
@@ -356,7 +381,10 @@ def send_queue(directory: Path, input_file: Path | None, submit: bool,
             result = lookup_client.check(payload)
             queue.record_lookup(item, result.as_history(config))
             checked += 1
-            print(f"Checked record: {item.path.name}")
+            person = payload["person"]
+            print("\n" + "=" * 64)
+            print(f"Local person checked: {person['given_name']} {person['family_name']}")
+            print(f"Local queue file: {item.path.name}")
             show_lookup_result(result)
             # Only two successful searches with no candidates allow creation.
             if result.outcome != "not_found":
@@ -392,7 +420,7 @@ def send_queue(directory: Path, input_file: Path | None, submit: bool,
             show_success(result)
             sent += 1
             previous_post = True
-        print(f"Checked {checked} record(s); {cleared} passed; {held} held for review.")
+        print(f"\nChecked {checked} record(s); {cleared} passed; {held} held for review.")
         if check_only:
             print("GET checks only. No people were created or updated. Use --submit to send pending records after fresh checks.")
         else:
