@@ -3,6 +3,9 @@ __pycache__/
 .venv
 .env
 
+# Keep the developer's detailed review local.
+/CODE_REVIEW.md
+
 # Contact records and machine-specific queue history do not belong in Git.
 /pending_person.json
 /senders_pdfs/*

@@ -672,5 +672,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-# A desktop launcher is still future work.
