@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import tempfile
 from typing import Any
+from member_classification import normalize_classification
 
 
 DEFAULT_QUEUE = Path(__file__).resolve().parent / "composed_info"
@@ -71,10 +72,12 @@ def _has_queue_data(directory: Path) -> bool:
 
 
 def _record_bytes(record: dict[str, Any]) -> bytes:
-    if not isinstance(record, dict) or set(record) != CONTACT_FIELDS:
-        raise QueueError("A queued record must contain exactly the nine approved contact fields.")
+    if not isinstance(record, dict) or set(record) not in (CONTACT_FIELDS, CONTACT_FIELDS | {"classification"}):
+        raise QueueError("A queued record must contain the nine approved contact fields and only the optional classification.")
     if any(not isinstance(value, str) or not value.strip() for value in record.values()):
         raise QueueError("Every queued contact field must contain text.")
+    if "classification" in record and normalize_classification(record["classification"]) != record["classification"]:
+        raise QueueError("The classification must use its approved tag name.")
     return json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 

@@ -42,8 +42,11 @@ class ActionBuilderConfig:
     api_key: str = field(repr=False)  # Do not expose credentials in repr().
     subdomain: str
     campaign_id: str
+    residence_local: str = ""
 
     def __post_init__(self) -> None:
+        if not isinstance(self.residence_local, str) or (self.residence_local and not re.fullmatch(r"[0-9]{1,6}", self.residence_local)):
+            raise LookupError("ACTION_BUILDER_RESIDENCE_LOCAL must be a local number, or blank for the legacy contact-only workflow.")
         if not isinstance(self.api_key, str) or not self.api_key.strip():
             raise LookupError("ACTION_BUILDER_API_KEY is required.")
         if any(character.isspace() for character in self.api_key):
@@ -85,6 +88,7 @@ class ActionBuilderConfig:
                     "ACTION_BUILDER_API_KEY",
                     "ACTION_BUILDER_SUBDOMAIN",
                     "ACTION_BUILDER_CAMPAIGN_ID",
+                    "ACTION_BUILDER_RESIDENCE_LOCAL",
                 )
             )
         )

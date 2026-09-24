@@ -31,6 +31,7 @@ from pdf_downloads_finder import (
     fingerprint_pdf,
 )
 from record_queue import DEFAULT_QUEUE, QueueError, RecordQueue
+from member_classification import extract_classification, normalize_classification
 
 
 # These measurements describe the checklist in the supplied PDF.
@@ -359,16 +360,22 @@ def extract_approved_person(pdf_path: str | Path) -> dict[str, str]:
             )
 
         # Do not search another page to fill missing checklist answers.
-        return parse_approved_person(matches[0])
+        person = parse_approved_person(matches[0])
+        classification = extract_classification(reader, read_page_fragments)
+        if classification is not None:
+            person["classification"] = classification
+        return person
 
 
 def save_approved_person(person: dict[str, str], output_path: str | Path) -> None:
     """Replace the output only after a complete new record has been written."""
     path = Path(output_path)
-    if set(person) != set(FIELDS):
+    if set(person) not in (set(FIELDS), set(FIELDS) | {"classification"}):
         raise ExtractionError(
-            "The output record must contain exactly the nine approved contact fields."
+            "The output record must contain the nine approved contact fields and only the optional classification."
         )
+    if "classification" in person:
+        normalize_classification(person["classification"])
 
     # A temporary file in the same folder lets os.replace finish atomically.
     # Readers see the old complete file or the new complete file, not half a file.

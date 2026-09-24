@@ -11,6 +11,8 @@ from typing import Any
 import requests
 
 from action_builder_lookup import ActionBuilderConfig, ActionBuilderLookup, LookupResult
+from member_classification import CLASSIFICATIONS, normalize_classification
+from member_automation import MemberAutomationClient, prepare_member_payload
 from extract_person import (
     clean_text,
     normalize_email,
@@ -38,6 +40,7 @@ REVIEW_FIELDS = (
     ("locality", "City"),
     ("region", "State"),
     ("postal_code", "ZIP code"),
+    ("classification", "Classification"),
 )
 
 
@@ -55,6 +58,8 @@ def confirm(prompt: str) -> bool:
 def normalize_review_field(field: str, value: str) -> str:
     """Apply the same contact rules used when reading the source PDF."""
     value = clean_text(value)
+    if field == "classification":
+        return normalize_classification(value)
     if not value:
         raise ValueError("All nine contact fields are required; this value cannot be blank.")
     normalizers = {
@@ -83,18 +88,19 @@ def normalize_review_field(field: str, value: str) -> str:
 
 def normalize_review_record(record: dict[str, Any]) -> dict[str, str]:
     """Keep the review editor within the nine approved, nonempty contact fields."""
-    if not isinstance(record, dict) or set(record) != CONTACT_FIELDS:
-        raise ValueError("The record must contain exactly the nine approved contact fields.")
+    if not isinstance(record, dict) or set(record) not in (CONTACT_FIELDS, CONTACT_FIELDS | {"classification"}):
+        raise ValueError("The record must contain the nine approved contact fields and only the optional classification.")
     if any(not isinstance(value, str) for value in record.values()):
         raise ValueError("Every contact field must contain text.")
-    return {field: normalize_review_field(field, record[field]) for field, _ in REVIEW_FIELDS}
+    return {field: normalize_review_field(field, record[field]) for field, _ in REVIEW_FIELDS
+            if field != "classification" or record.get(field, "").strip()}
 
 
 def show_person(record: dict[str, Any]) -> None:
     for field, label in REVIEW_FIELDS:
         if field in {"email", "address_line_1"}:
             print()
-        print(f"  {label + ':':<16} {record[field]}")
+        print(f"  {label + ':':<16} {record.get(field) or 'Not set'}")
 
 
 def show_review(queue: RecordQueue, item: QueueItem, record: dict[str, Any]) -> None:
@@ -140,7 +146,7 @@ def edit_record(
     while True:
         print()
         for number, (field, label) in enumerate(REVIEW_FIELDS, start=1):
-            print(f"  {number}. {label + ':':<16} {edited[field]}")
+            print(f"  {number}. {label + ':':<16} {edited.get(field) or 'Not set'}")
         selection = input("\nField number to change (Enter or done to finish): ").strip().casefold()
         if selection in {"", "done"}:
             try:
@@ -155,10 +161,12 @@ def edit_record(
                 print("No changes were needed.")
             return item, normalized
         if not selection.isdigit() or not 1 <= int(selection) <= len(REVIEW_FIELDS):
-            print("Choose a field number from 1 to 9, or press Enter to finish.")
+            print(f"Choose a field number from 1 to {len(REVIEW_FIELDS)}, or press Enter to finish.")
             continue
         field, label = REVIEW_FIELDS[int(selection) - 1]
-        print(f"\nOld {label}: {edited[field]}")
+        print(f"\nOld {label}: {edited.get(field) or 'Not set'}")
+        if field == "classification":
+            print("Approved classifications: " + "; ".join(CLASSIFICATIONS))
         while True:
             replacement = input("New value (Enter keeps the old value): ")
             if not replacement.strip():
@@ -184,6 +192,7 @@ def review_send(
     normalize_review_record(record)
     payload = build_actionbuilder_payload(record)
     config = ActionBuilderConfig.from_environment()
+    payload = prepare_member_payload(payload, config)
     print(f"\nChecking {config.subdomain}.actionbuilder.org, campaign {config.campaign_id}...")
     result = ActionBuilderLookup(config).check(payload)
     queue.record_review_lookup(item, result.as_history(config))
@@ -219,10 +228,13 @@ def review_send(
         print("Kept for review. Nothing was sent.")
         return False
 
+    if payload.get("add_tags"):
+        MemberAutomationClient(config).preflight(payload)
     time.sleep(0.3)  # Leave room between the final GET and POST in the API rate limit.
     queue.begin_review_send(item, config_destination=config.destination, reason=reason)
     try:
-        response = submit_to_actionbuilder(payload, config=config)
+        options = {"member_preflight": True} if payload.get("add_tags") else {}
+        response = submit_to_actionbuilder(payload, config=config, **options)
         queue.finish_send(item, response)
     except BaseException:
         # A timeout, interruption, or failed local receipt write can follow creation.
@@ -253,11 +265,13 @@ def reconcile_person(queue: RecordQueue, item: QueueItem, record: dict[str, Any]
     if not details.get("lookup") or details["lookup"]["destination"] != config.destination:
         print("Kept for review. Configure the same campaign used for the saved submission check.")
         return False
-    result = ActionBuilderLookup(config).check(build_actionbuilder_payload(record))
+    payload = prepare_member_payload(build_actionbuilder_payload(record), config)
+    result = ActionBuilderLookup(config).check(payload)
     show_lookup_result(result)
     if result.outcome != "existing":
         print("Kept for review. The fresh searches did not find one exact matching person. Nothing was sent.")
         return False
+    MemberAutomationClient(config).verify(payload, {"person": {"identifiers": result.candidates[0]["identifiers"]}})
     print(f"\nVerified in {config.subdomain}.actionbuilder.org, campaign {config.campaign_id}.")
     if not confirm("Mark this earlier submission complete locally using the matching person ID? No person will be created or changed"):
         print("Kept for later review.")

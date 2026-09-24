@@ -2,7 +2,7 @@
 
 Import contact information from completed **New Member Checklist / LPX Data Entry** PDFs into Action Builder. The program finds downloaded forms, lets you preview the extracted details, checks for existing people by email and phone, and submits eligible records. An interactive review command handles records that need attention.
 
-It reads first name, last name, middle initial, email, phone, street address, city, state, and ZIP code. All nine fields are required. The supported format is the checklist template with US contact details; scanned images and unrelated PDF layouts are not supported. Other form information, including Social Security numbers and beneficiary details, is excluded.
+It reads first name, last name, middle initial, email, phone, street address, city, state, and ZIP code. All nine contact fields are required. It also recognizes the selected classification on the supported CW/CE sheet. The supported format is the checklist template with US contact details; scanned images and unrelated PDF layouts require review. Other form information, including Social Security numbers and beneficiary details, is excluded.
 
 [Setup](#setup) · [Daily commands](#daily-commands) · [Manual review](#manual-review) · [Folder options](#folder-options) · [Help](#help) · [License](#license)
 
@@ -63,6 +63,24 @@ Open `.env` in a text editor and replace the three example values:
 | `ACTION_BUILDER_CAMPAIGN_ID` | The ID of the campaign you want to use. |
 
 Keep `.env` private. Use one designated sending computer and keep its queue associated with the same campaign. Each installation has its own history; separate computers can create duplicates if they submit at the same time.
+
+### Member tags and assessment
+
+Set `ACTION_BUILDER_RESIDENCE_LOCAL` in your own `.env` to the exact local-number response you want assigned to every newly submitted member. The example file leaves it blank; no local number is hard-coded.
+
+When configured, submissions include:
+
+- **Fourth District Workers → Classification - 4D:** the approved PDF classification. Every CW/CE level maps to **CE/CW**; the explicitly selected JOURNEYMAN option maps to **Journeyman**.
+- **Fourth District Workers → Local Jurisdiction by Zip (Residence) - 4D:** the configured constant, regardless of residence ZIP.
+- **Assessment 1.**
+
+The tag responses must already exist in the campaign. The sender checks their exact section and field before creation, then reads back both tags and assessment 1 before marking the submission complete. If the person was created but these values cannot be confirmed, the record stays held: correct the existing Action Builder entry and reconcile it, rather than sending the person again.
+
+Classification recognition is deliberately limited to the verified CW/CE form and its selected mark. Missing or ambiguous classifications are held when checking or sending with member automation enabled. Use **Change → Classification (field 10)** in `review_person.py` to choose from the approved list. An existing queue record keeps its history; no manual JSON edits or queue reset are needed. All allowed options are defined in `member_classification.py`; an unknown value never silently becomes **None**.
+
+A blank residence-local setting retains the legacy contact-only workflow for older records without classification. Newly classified records require the setting before sending. Preview JSON shows the extracted classification tag; the residence-local tag and assessment are added from the configured destination settings during checking/sending.
+
+**Out-of-jurisdiction notes are not enabled yet.** They require the jurisdiction map/list you will provide and a confirmed notes destination. This constant is not a ZIP-to-local lookup, and the program does not infer whether an address is inside or outside the local's jurisdiction.
 
 ### 4. Check the installation
 

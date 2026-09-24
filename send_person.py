@@ -22,6 +22,7 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
+from member_automation import MemberAutomationClient, MemberAutomationError, classification_tag, prepare_member_payload
 
 from action_builder_lookup import ActionBuilderConfig, ActionBuilderLookup, LookupError, LookupResult
 from record_queue import (
@@ -103,6 +104,7 @@ def build_actionbuilder_payload(record: dict[str, Any]) -> dict[str, Any]:
         "locality",
         "region",
         "postal_code",
+        "classification",
     }
 
     unexpected_fields = set(record) - allowed_input_fields
@@ -185,7 +187,10 @@ def build_actionbuilder_payload(record: dict[str, Any]) -> dict[str, Any]:
             "address_type": "physical",
         }
     ]
-    return {"person": person}
+    payload = {"person": person}
+    if "classification" in record:
+        payload["add_tags"] = [classification_tag(record["classification"])]
+    return payload
 
 
 class SubmissionReceiptError(RuntimeError):
@@ -214,6 +219,7 @@ def _receipt_shape(result: Any, status_code: int) -> str:
 
 def submit_to_actionbuilder(
     payload: dict[str, Any], *, config: ActionBuilderConfig | None = None,
+    member_preflight: bool = False,
 ) -> dict[str, Any]:
     """This takes in the payload(the formed payload from the approved person)
     to then submit that data provided the .env exist with the correct
@@ -222,6 +228,11 @@ def submit_to_actionbuilder(
     # Use the same campaign and credentials for lookup and submission.
     if config is None:
         config = ActionBuilderConfig.from_environment()
+    payload = prepare_member_payload(payload, config)
+    member_client = MemberAutomationClient(config)
+    if payload.get("add_tags") and not member_preflight:
+        member_client.preflight(payload)
+        time.sleep(0.3)
 
     response = requests.post(
         config.people_url,
@@ -251,7 +262,7 @@ def submit_to_actionbuilder(
             "but the response was not valid JSON."
         ) from error
     try:
-        return _validate_submission_receipt(result, response.status_code)
+        receipt = _validate_submission_receipt(result, response.status_code)
     except SubmissionReceiptError as error:
         # Never repeat the POST. A successful response with an unfamiliar body
         # may still have created the person. Confirm the desired record with
@@ -267,10 +278,17 @@ def submit_to_actionbuilder(
                     and not checked.candidates[0]["differing_fields"]):
                 receipt = {"person": {"identifiers": checked.candidates[0]["identifiers"]},
                            "confirmed_by_lookup": True}
-                return _validate_submission_receipt(receipt, response.status_code)
-        raise SubmissionReceiptError(
-            f"{error} Read-only verification did not establish one exact matching person."
-        ) from None
+                receipt = _validate_submission_receipt(receipt, response.status_code)
+            else:
+                raise SubmissionReceiptError(
+                    f"{error} Read-only verification did not establish one exact matching person."
+                ) from None
+        else:
+            raise
+    # A valid person receipt alone does not prove tags or assessment applied.
+    member_client.next_request = time.monotonic() + .3
+    member_client.verify(payload, receipt)
+    return receipt
 
 
 def _validate_submission_receipt(result: Any, status_code: int) -> dict[str, Any]:
@@ -430,6 +448,10 @@ def send_queue(directory: Path, input_file: Path | None, submit: bool,
         # Reuse one client so its request pacing applies throughout this batch.
         config = ActionBuilderConfig.from_environment()
         lookup_client = ActionBuilderLookup(config)
+        if config.residence_local:
+            print(f"Member automation: classification from PDF; residence local {config.residence_local}; assessment 1.")
+        else:
+            print("Member automation is not configured. Set ACTION_BUILDER_RESIDENCE_LOCAL to enable both tags and assessment 1.")
         checked = cleared = held = sent = 0
         previous_post = False
         for item, payload in prepared:
@@ -437,6 +459,13 @@ def send_queue(directory: Path, input_file: Path | None, submit: bool,
             # Re-read eligibility rather than trusting the original list.
             if item.id not in {current.id for current in queue.pending_records()}:
                 print(f"Related record held for review: {item.path.name}")
+                held += 1
+                continue
+            try:
+                payload = prepare_member_payload(payload, config)
+            except MemberAutomationError as error:
+                queue.hold(item.family, set(), [], str(error))
+                print(f"Held for member information review: {error}")
                 held += 1
                 continue
             if previous_post:
@@ -459,11 +488,14 @@ def send_queue(directory: Path, input_file: Path | None, submit: bool,
             if check_only:
                 print("Passed email and phone checks. Kept pending for submission.")
                 continue
+            if payload.get("add_tags"):
+                MemberAutomationClient(config).preflight(payload)
             # The lookup client spaces its GETs; leave a gap before the POST too.
             time.sleep(0.3)
             queue.begin_send(item)  # Save 'sending' before the POST starts.
             try:
-                result = submit_to_actionbuilder(payload, config=config)
+                options = {"member_preflight": True} if payload.get("add_tags") else {}
+                result = submit_to_actionbuilder(payload, config=config, **options)
                 queue.finish_send(item, result)
             except BaseException:
                 # Even a timeout may mean the server created the person already.
