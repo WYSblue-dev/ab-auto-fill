@@ -321,6 +321,11 @@ class ActionBuilderLookup:
             expected_size = per_page
             embedded = result.get("_embedded")
             rows = embedded.get("osdi:people") if isinstance(embedded, dict) else None
+            # Live Action Builder empty searches omit _embedded entirely.
+            # Only an explicit zero-page first response proves this is empty;
+            # missing collections on nonempty searches must still fail closed.
+            if "_embedded" not in result and total == 0 and page == 1:
+                rows = []
             if not isinstance(rows, list) or len(rows) > per_page:
                 raise LookupError(
                     "The search did not return the expected people collection."

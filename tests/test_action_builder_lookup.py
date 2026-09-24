@@ -320,6 +320,32 @@ class LookupTests(unittest.TestCase):
         with self.assertRaises(lookup.LookupError):
             self.client._search("email_address", "morgan@example.test")
 
+    def test_live_zero_page_response_without_embedded_clears_both_searches(self):
+        document = collection(total_pages=0, _links={})
+        del document["_embedded"]
+        self.get.side_effect = [response(document), response(document)]
+        result = self.client.check(payload())
+        self.assertEqual(result.outcome, "not_found")
+        self.assertEqual(self.get.call_count, 2)
+
+    def test_omitted_collection_requires_zero_pages_and_no_next_link(self):
+        for document in (
+            collection(total_pages=1),
+            collection(total_pages=0, _links={"next": {"href": "https://example.invalid"}}),
+        ):
+            del document["_embedded"]
+            with self.subTest(document=document):
+                self.get.side_effect = [response(document)]
+                with self.assertRaises(lookup.LookupError):
+                    self.client._search("email_address", "morgan@example.test")
+
+    def test_explicit_malformed_embedded_is_not_an_empty_search(self):
+        for embedded in (None, {}, [], {"osdi:people": None}):
+            with self.subTest(embedded=embedded):
+                self.get.side_effect = [response({**collection(total_pages=0), "_embedded": embedded})]
+                with self.assertRaises(lookup.LookupError):
+                    self.client._search("email_address", "morgan@example.test")
+
     def test_missing_or_invalid_pagination_cannot_confirm_absence(self):
         invalid_documents = []
         for name in ("page", "total_pages", "per_page"):
