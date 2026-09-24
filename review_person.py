@@ -243,6 +243,31 @@ def review_send(
     return True
 
 
+def reconcile_person(queue: RecordQueue, item: QueueItem, record: dict[str, Any], *, checked: bool) -> bool:
+    """Confirm an earlier creation and update only the local queue."""
+    details = queue.review_details(item)
+    if not checked or details["status"] != "uncertain":
+        print("Kept for review. Check the earlier uncertain submission in Action Builder first.")
+        return False
+    config = ActionBuilderConfig.from_environment()
+    if not details.get("lookup") or details["lookup"]["destination"] != config.destination:
+        print("Kept for review. Configure the same campaign used for the saved submission check.")
+        return False
+    result = ActionBuilderLookup(config).check(build_actionbuilder_payload(record))
+    show_lookup_result(result)
+    if result.outcome != "existing":
+        print("Kept for review. The fresh searches did not find one exact matching person. Nothing was sent.")
+        return False
+    print(f"\nVerified in {config.subdomain}.actionbuilder.org, campaign {config.campaign_id}.")
+    if not confirm("Mark this earlier submission complete locally using the matching person ID? No person will be created or changed"):
+        print("Kept for later review.")
+        return False
+    queue.reconcile_sent(item, lookup=result.as_history(config),
+                         reason="Earlier submission verified by the operator and fresh exact email and phone matches; reconciled without sending again.")
+    print("Marked complete and moved to sent. No POST or update was made to Action Builder.")
+    return True
+
+
 def run_review(directory: Path) -> int:
     """Hold the queue lock while the operator works through a stable review list."""
     with RecordQueue(directory) as queue:
@@ -264,6 +289,7 @@ def run_review(directory: Path) -> int:
             while True:
                 print("\nChoose an action\n")
                 print("  s  Send after checks and confirmation")
+                print("  r  Reconcile an earlier submission already in Action Builder (no sending)")
                 print("  c  Change local contact details")
                 print("  k  Keep for later review")
                 print("  d  Discard this local record")
@@ -277,6 +303,9 @@ def run_review(directory: Path) -> int:
                     break
                 if action in {"s", "send"}:
                     review_send(queue, item, record, checked=checked)
+                    break
+                if action in {"r", "reconcile"}:
+                    reconcile_person(queue, item, record, checked=checked)
                     break
                 if action in {"c", "change", "edit"}:
                     previous = record
@@ -303,7 +332,7 @@ def run_review(directory: Path) -> int:
                     else:
                         print("Kept for later review.")
                     break
-                print("Choose send, change, keep, discard, or quit.")
+                print("Choose send, reconcile, change, keep, discard, or quit.")
         print("\nReview pass complete. Any records kept for later remain held.")
         return 0
 

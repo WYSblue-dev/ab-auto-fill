@@ -44,6 +44,7 @@ class ReviewPersonTests(unittest.TestCase):
         with RecordQueue(self.queue_dir) as queue:
             queue.enqueue("uncertain-person", RECORD, {"one"}, ["one.pdf"])
             item = queue.pending_records()[0]
+            queue.record_lookup(item, CLEAR.as_history(CONFIG))
             queue.begin_send(item)
             queue.mark_uncertain(item, "An invented earlier send timed out.")
         return item
@@ -355,6 +356,43 @@ class ReviewPersonTests(unittest.TestCase):
         self.assertIn("sent", output.lower())
         self.assert_no_network()
         self.assertEqual(self.state()["records"][sent.id]["status"], "sent")
+
+    def test_reconcile_verifies_existing_person_and_moves_to_sent_without_post(self):
+        item = self.seed_uncertain()
+        status, output, errors = self.run_cli(["y", "r", "y"], lookup_result=EXISTING)
+        self.assertEqual(status, 0, errors)
+        self.last_lookup.assert_called_once()
+        self.last_submit.assert_not_called()
+        entry = self.state()["records"][item.id]
+        self.assertEqual(entry["status"], "sent")
+        self.assertEqual(entry["result"]["identifiers"], [fixture.IDENTIFIER])
+        self.assertNotIn("approved_send", [decision["action"] for decision in entry["decisions"]])
+        self.assertIn("No POST", output)
+        with RecordQueue(self.queue_dir) as queue:
+            self.assertEqual(queue.review_records(), [])
+            self.assertEqual(queue.pending_records(), [])
+            self.assertTrue((self.queue_dir / "sent" / item.path.name).exists())
+            queue.enqueue(item.family, RECORD, {"one"}, ["one.pdf"])
+            self.assertEqual(queue.pending_records(), [])
+
+    def test_reconcile_declined_unchecked_or_nonexact_match_stays_held(self):
+        item = self.seed_uncertain()
+        for answers, result in ((["n", "r"], EXISTING), (["y", "r", "n"], EXISTING),
+                                (["y", "r"], CLEAR), (["y", "r"], fixture.AMBIGUOUS)):
+            with self.subTest(answers=answers, result=result.outcome):
+                self.run_cli(answers, lookup_result=result)
+                self.last_submit.assert_not_called()
+                self.assertEqual(self.state()["records"][item.id]["status"], "uncertain")
+
+    def test_reconcile_refuses_another_campaign_before_any_network_request(self):
+        self.seed_uncertain()
+        different = review_person.ActionBuilderConfig("token", "other", "other-campaign")
+        with RecordQueue(self.queue_dir) as queue:
+            item = queue.review_records()[0]
+            with patch.object(review_person.ActionBuilderConfig, "from_environment", return_value=different), \
+                    patch.object(review_person.ActionBuilderLookup, "check") as lookup, redirect_stdout(io.StringIO()):
+                self.assertFalse(review_person.reconcile_person(queue, item, RECORD, checked=True))
+                lookup.assert_not_called()
 
 
 if __name__ == "__main__":

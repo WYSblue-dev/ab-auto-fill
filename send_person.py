@@ -23,7 +23,7 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
-from action_builder_lookup import ActionBuilderConfig, ActionBuilderLookup, LookupResult
+from action_builder_lookup import ActionBuilderConfig, ActionBuilderLookup, LookupError, LookupResult
 from record_queue import (
     DEFAULT_QUEUE,
     RECORD_FOLDERS,
@@ -188,6 +188,30 @@ def build_actionbuilder_payload(record: dict[str, Any]) -> dict[str, Any]:
     return {"person": person}
 
 
+class SubmissionReceiptError(RuntimeError):
+    """An unconfirmed POST, with structural diagnostics safe to display."""
+
+
+def _receipt_shape(result: Any, status_code: int) -> str:
+    """Describe only known fields and types, never remote values or key names."""
+    def shape(container: Any, key: str) -> str:
+        if not isinstance(container, dict) or key not in container:
+            return "missing"
+        value = container[key]
+        if isinstance(value, list):
+            return f"list({len(value)})"
+        return type(value).__name__
+
+    person = result.get("person") if isinstance(result, dict) else None
+    return (
+        f"HTTP {status_code}; response={type(result).__name__}; "
+        f"person={shape(result, 'person')}; "
+        f"person.identifiers={shape(person, 'identifiers')}; "
+        f"top-level identifiers={shape(result, 'identifiers')}; "
+        f"error={shape(result, 'error')}; errors={shape(result, 'errors')}"
+    )
+
+
 def submit_to_actionbuilder(
     payload: dict[str, Any], *, config: ActionBuilderConfig | None = None,
 ) -> dict[str, Any]:
@@ -226,8 +250,37 @@ def submit_to_actionbuilder(
             "Action Builder returned a successful status "
             "but the response was not valid JSON."
         ) from error
+    try:
+        return _validate_submission_receipt(result, response.status_code)
+    except SubmissionReceiptError as error:
+        # Never repeat the POST. A successful response with an unfamiliar body
+        # may still have created the person. Confirm the desired record with
+        # complete, fresh email AND phone searches in the same campaign.
+        if 200 <= response.status_code < 300:
+            time.sleep(0.3)
+            try:
+                checked = ActionBuilderLookup(config).check(payload)
+            except (LookupError, requests.RequestException):
+                checked = None
+            if (checked is not None and checked.outcome == "existing"
+                    and len(checked.candidates) == 1
+                    and not checked.candidates[0]["differing_fields"]):
+                receipt = {"person": {"identifiers": checked.candidates[0]["identifiers"]},
+                           "confirmed_by_lookup": True}
+                return _validate_submission_receipt(receipt, response.status_code)
+        raise SubmissionReceiptError(
+            f"{error} Read-only verification did not establish one exact matching person."
+        ) from None
+
+
+def _validate_submission_receipt(result: Any, status_code: int) -> dict[str, Any]:
+    """Normalize no fields: require one unambiguous native person identifier."""
     if not isinstance(result, dict):
-        raise RuntimeError("Unexpected Action Builder response format.")
+        raise SubmissionReceiptError(
+            "Unexpected Action Builder response format. "
+            f"Receipt diagnostic: {_receipt_shape(result, status_code)}. "
+            "Check Action Builder before retrying."
+        )
     # A successful status alone is not proof that a person was created.
     person = result.get("person")
     identifiers = person.get("identifiers") if isinstance(person, dict) else None
@@ -236,19 +289,30 @@ def submit_to_actionbuilder(
         or not isinstance(identifiers, list)
         or any(not isinstance(value, str) or not value for value in identifiers)
     ):
-        raise RuntimeError("Action Builder did not return a confirmed person receipt. Review the outcome before retrying.")
+        raise SubmissionReceiptError(
+            "Action Builder did not return a confirmed person receipt. "
+            f"Receipt diagnostic: {_receipt_shape(result, status_code)}. "
+            "Review the outcome before retrying."
+        )
     native_ids = [value for value in identifiers if value.startswith("action_builder:")]
     if len(native_ids) != 1 or not re.fullmatch(
         r"action_builder:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}",
         native_ids[0],
     ):
-        raise RuntimeError("Action Builder did not return one valid person ID. Review the outcome before retrying.")
+        raise SubmissionReceiptError(
+            "Action Builder did not return one valid person ID. "
+            f"Receipt diagnostic: {_receipt_shape(result, status_code)}. "
+            "Review the outcome before retrying."
+        )
     return result
 
 
 def show_success(result: dict[str, Any]) -> None:
     """Show a short receipt without dumping the entire API response."""
-    print("\nAction Builder submission succeeded.\n")
+    if result.get("confirmed_by_lookup"):
+        print("\nPerson confirmed in Action Builder by fresh email and phone lookups.\n")
+    else:
+        print("\nAction Builder submission succeeded.\n")
     person = result.get("person", {})
     if not isinstance(person, dict):
         return
@@ -256,7 +320,7 @@ def show_success(result: dict[str, Any]) -> None:
     if isinstance(identifiers, list):
         for identifier in identifiers:
             if isinstance(identifier, str) and identifier.startswith("action_builder:"):
-                print(f"  Created person ID: {identifier}")
+                print(f"  Confirmed person ID: {identifier}")
     if isinstance(person.get("browser_url"), str):
         print(f"  Open in Action Builder: {person['browser_url']}")
     print()

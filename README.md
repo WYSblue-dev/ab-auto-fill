@@ -120,6 +120,7 @@ The display separates local contact details, the reason for review, source PDFs,
 |---|---|
 | **Change** | Select a field, see its old value, and enter a correction. The updated person is displayed before you decide about sending. |
 | **Send** | Runs fresh checks and asks for confirmation before creating this person. Candidate matches and uncertain earlier attempts require additional confirmation and a written reason. |
+| **Reconcile (`r`)** | For an uncertain submission you already found in Action Builder: fresh GET searches must find one exact match in the saved campaign. After confirmation, moves the local record to `sent` without creating or updating anyone. |
 | **Keep** | Leaves the record for another review session. |
 | **Discard** | Confirms removal of the local contact file. History remains to prevent the same record returning on another import. |
 | **Quit** | Ends the session. Unfinished records stay held. |
@@ -127,6 +128,10 @@ The display separates local contact details, the reason for review, source PDFs,
 Pressing Enter at a confirmation means **No**; Enter at the action menu means **Keep**. Sending and discarding require confirmation that you checked the person and paperwork.
 
 **Send creates the reviewed person directly after approval.** It does not return them to pending. A related record already marked sent blocks another creation. Changes edit the local contact; they do not update an existing Action Builder person. Discarding leaves source PDFs and remote records untouched.
+
+If a submission receives a successful HTTP response but an unrecognized JSON receipt, the sender now checks Action Builder again using GET requests. One exact email/phone search result with matching contact details confirms the person is present; missing, differing, ambiguous, or failed results remain held for review. The POST is never repeated by this recovery. This verifies the resulting record, not the reason the original receipt differed.
+
+For an earlier held submission you verified manually, run `review_person.py`, confirm that you checked the person, choose **r**, and confirm the fresh exact match. Do not choose Send for a person who was already created. Keep the record held if reconciliation cannot establish one exact match.
 
 You can review before or after submitting the pending batch. Exit the review session before running another queue command, because the session holds the queue lock.
 

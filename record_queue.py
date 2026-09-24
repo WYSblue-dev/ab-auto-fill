@@ -787,6 +787,33 @@ class RecordQueue:
         self._commit()
         self._review_checks.add(item.id)
 
+    def reconcile_sent(self, item: QueueItem, *, lookup: dict[str, Any], reason: str) -> None:
+        """Resolve an uncertain attempt using a newly verified exact match, no POST."""
+        self._validate()
+        entry = self._entry_for(item)
+        if entry["status"] != "uncertain":
+            raise QueueError("Only an uncertain submission can be marked already created here.")
+        reason = self._review_reason(reason)
+        self._validate_lookup(lookup)
+        prior = entry.get("lookup")
+        if not prior or prior["destination"] != lookup["destination"]:
+            raise QueueError("The verification campaign must match the saved submission lookup.")
+        if lookup["outcome"] != "existing" or len(lookup["candidates"]) != 1:
+            raise QueueError("Reconciliation requires one exact matching Action Builder person.")
+        candidate = lookup["candidates"][0]
+        identifiers = candidate["identifiers"]
+        if (candidate["differing_fields"] or len(identifiers) != 1 or not re.fullmatch(
+                r"action_builder:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", identifiers[0])):
+            raise QueueError("Reconciliation requires one valid Action Builder person ID and matching details.")
+        # Retain a checked decision in the existing history format. This does
+        # not record a new approved_send decision or consume a sending attempt.
+        self.record_review_lookup(item, lookup)
+        entry["decisions"][-1]["reason"] = reason
+        entry.update(status="sent", updated_at=_now(), reason=reason,
+                     result={"identifiers": list(identifiers)})
+        self._review_checks.discard(item.id)
+        self._commit()
+
     def begin_review_send(self, item: QueueItem, *, config_destination: dict[str, str], reason: str) -> None:
         """Claim one explicitly approved send; connected alternatives stay held."""
         self._validate()
