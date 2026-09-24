@@ -20,16 +20,27 @@ The interface uses warm amber accents. Red labels identify held records, uncerta
 4. Open the desktop shortcut. On first launch the app creates `.env` if it is missing and prompts for the API key, organization subdomain, and campaign ID. Choose your actual Downloads folder if Windows redirects it elsewhere.
 5. Enter the constant **Residence local** to enable member tags and assessment 1. Use **Test connection**, then **Save settings**. The connection test searches with a synthetic email and checks the CE/CW and configured local tag definitions; it does not create a person or verify permission to create people.
 
-From a new PowerShell window, with Git and Python installed:
+From a new **PowerShell** window, with Git and Python installed, run each command separately and press Enter after each one. Do not join the commands with `&` or `&&`.
 
 ```powershell
 git clone https://github.com/WYSblue-dev/ab-auto-fill.git ab_automation
-cd ab_automation
-& ".\Setup Windows.cmd"
-& ".\Start Member Intake.cmd"
 ```
 
-The setup command waits for a keypress when finished. Later, use the **Member Intake** desktop shortcut. No virtual-environment activation or manual `.env` copy is needed for the GUI.
+```powershell
+cd ab_automation
+```
+
+```powershell
+Start-Process -FilePath ".\Setup Windows.cmd" -Wait
+```
+
+Setup opens a separate window. Wait for the success message, then press a key to close that window before launching:
+
+```powershell
+Start-Process -FilePath ".\Start Member Intake.cmd"
+```
+
+For an existing clone, open its project folder instead of cloning again. You can also double-click **Setup Windows.cmd** in File Explorer, then use the **Member Intake** desktop shortcut. No virtual-environment activation or manual `.env` copy is needed for the GUI.
 
 An existing `.env` is preserved. **Settings** is always available to replace incorrect or expired credentials. A blank API key field keeps the saved key. The app reads its own `.env` directly, so old environment variables do not override changes made in Settings. The file is excluded from Git and contains the key in plain text; keep it private.
 
