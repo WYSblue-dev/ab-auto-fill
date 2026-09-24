@@ -318,7 +318,8 @@ class RecordQueue:
                     raise QueueError("The queue contains an unexpected subfolder. Review it before continuing.")
                 if not path.is_file():
                     raise QueueError("The queue contains an unsupported filesystem entry.")
-                if folder == self.directory and path.name in {STATE_NAME, LOCK_NAME}:
+                # Optional GUI county annotations are separate from contact records.
+                if folder == self.directory and path.name in {STATE_NAME, LOCK_NAME, '.residence-reviews.json'}:
                     continue
                 # Finder creates this harmless metadata file when viewing folders.
                 if path.name == ".DS_Store":
@@ -686,6 +687,29 @@ class RecordQueue:
                             if identifier in family["record_ids"])
             result.append(QueueItem(identifier, self._path(identifier), owners[0]))
         return sorted(result, key=lambda item: (item.family, item.id))
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a detached, validated view for the local interface."""
+        self._validate()
+        state = self._require_open()
+        records = []
+        for identifier, entry in state["records"].items():
+            if entry["status"] == "discarded":
+                continue
+            families = sorted(name for name, data in state["families"].items()
+                              if identifier in data["record_ids"])
+            item = QueueItem(identifier, self._path(identifier), families[0])
+            row = {"id": identifier, "person": _load_json(item.path), **entry,
+                   "source_names": sorted({source for name in families
+                                           for source in state["families"][name]["source_names"]})}
+            if entry["status"] in {"review", "uncertain"}:
+                row.update(self.review_details(item))
+            records.append(row)
+        notices = [{"family": name, "reason": data["reason"]}
+                   for name, data in state["families"].items()
+                   if data["deferred"] or (data["review"] and data["current_id"] is None)]
+        return json.loads(json.dumps({"records": records, "notices": notices,
+                                     "counts": self.status_counts()}))
 
     def review_details(self, item: QueueItem) -> dict[str, Any]:
         """Explain a hold without exposing unrelated records or stored secrets."""

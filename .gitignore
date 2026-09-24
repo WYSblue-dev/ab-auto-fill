@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 .venv
 .env
+.member-intake-session.json
+.member-intake-session-*
 
 # Keep the developer's detailed review local.
 /CODE_REVIEW.md

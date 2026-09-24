@@ -1,0 +1,375 @@
+"""Exercise the local app using temporary workspaces and mocked Action Builder."""
+import io
+import json
+import os
+from pathlib import Path
+import tempfile
+import threading
+import unittest
+from unittest.mock import Mock, patch
+
+import requests
+
+import local_app
+from action_builder_lookup import LookupError
+from record_queue import RecordQueue
+from extract_person import ImportSummary
+from test_send_queue import RECORD, CLEAR, SUCCESS
+from test_lookup_queue import EXISTING, AMBIGUOUS
+
+
+class LocalAppTests(unittest.TestCase):
+    def enter_patch(self, context):
+        value = context.start()
+        self.addCleanup(context.stop)
+        return value
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.app = local_app.Application(self.root, self.root / 'queue')
+        self.data = {'api_key': 'test-secret', 'subdomain': 'example', 'campaign_id': 'campaign', 'downloads': str(self.root)}
+        self.app.settings.save(self.data)
+        self.config = self.app.settings.config()
+        self.lookup = self.enter_patch(patch.object(local_app.ActionBuilderLookup, 'check', return_value=CLEAR))
+        self.post = self.enter_patch(patch.object(local_app, 'submit_to_actionbuilder', return_value=SUCCESS))
+        self.enter_patch(patch.object(local_app.time, 'sleep'))
+        self.enter_patch(patch.object(requests, 'get', side_effect=AssertionError('Real GET forbidden')))
+        self.enter_patch(patch.object(requests, 'post', side_effect=AssertionError('Real POST forbidden')))
+
+    def seed(self, *, held=False, person=None, family='sample'):
+        with RecordQueue(self.app.queue_dir) as queue:
+            queue.enqueue(family, person or RECORD, {family + '-source'}, [family + '.pdf'])
+            if held:
+                queue.hold(family, {family + '-source'}, [family + '.pdf'], 'Check this contact.')
+            items = queue.review_records() if held else queue.pending_records()
+            return next(item for item in items if item.family == family)
+
+    def batch_data(self):
+        return {'ids': [row['id'] for row in self.app.state()['records'] if row['status']=='pending'],
+                'destination': self.config.destination, 'confirmed': True}
+
+    def review_data(self, item):
+        return {'id': item.id, 'confirmed': True, 'checked': True, 'reason': 'Verified this is a separate person.'}
+
+    def test_first_run_creates_private_empty_env_and_preserves_existing_file(self):
+        folder = self.root / 'first'
+        folder.mkdir()
+        settings = local_app.Settings(folder / '.env')
+        self.assertFalse(settings.public()['configured'])
+        if os.name == 'posix':
+            self.assertEqual(settings.path.stat().st_mode & 0o777, 0o600)
+        settings.path.write_text('# preserve me\nOTHER_SETTING=abc\n')
+        local_app.Settings(settings.path)
+        settings.save(self.data)
+        self.assertIn('OTHER_SETTING=abc', settings.path.read_text())
+        self.assertIn('# preserve me', settings.path.read_text())
+
+    def test_settings_edit_uses_file_not_stale_environment_and_hides_key(self):
+        with patch.dict(os.environ, {'ACTION_BUILDER_API_KEY': 'stale-token'}):
+            self.assertEqual(self.app.settings.config().api_key, 'test-secret')
+            self.app.settings.save({**self.data, 'api_key': 'replacement'})
+            self.assertEqual(self.app.settings.config().api_key, 'replacement')
+            self.app.settings.save({**self.data, 'api_key': ''})
+            self.assertEqual(self.app.settings.config().api_key, 'replacement')
+        self.assertNotIn('replacement', json.dumps(self.app.state()))
+        self.assertNotIn('test-secret', json.dumps(self.app.state()))
+
+    def test_invalid_settings_preserve_previous_file(self):
+        before = self.app.settings.path.read_bytes()
+        with self.assertRaises(LookupError):
+            self.app.settings.save({**self.data, 'subdomain': 'https://outside.example'})
+        self.assertEqual(before, self.app.settings.path.read_bytes())
+        with self.assertRaises(ValueError):
+            self.app.settings.save({**self.data, 'downloads': str(self.root / 'missing')})
+        self.assertEqual(before, self.app.settings.path.read_bytes())
+
+    def test_residence_local_is_saved_and_preserved_during_credential_edits(self):
+        self.app.settings.save({**self.data,'residence_local':'999'})
+        self.assertEqual(self.app.settings.config().residence_local,'999')
+        self.assertEqual(self.app.settings.public()['residence_local'],'999')
+        self.app.settings.save({**self.data,'api_key':'replacement'})
+        self.assertEqual(self.app.settings.config().residence_local,'999')
+
+    def test_test_connection_is_get_only_and_does_not_save_proposed_key(self):
+        with patch.object(local_app.ActionBuilderLookup, '_search', return_value=[]) as search:
+            self.app.perform('test', {**self.data, 'api_key': 'unsaved'})
+        search.assert_called_once_with('email_address', 'lookup-diagnostic@example.invalid')
+        self.assertEqual(self.app.settings.config().api_key, 'test-secret')
+        self.post.assert_not_called()
+
+    def test_county_entry_is_local_and_never_changes_person_payload(self):
+        item = self.seed()
+        with patch.object(local_app, 'county_from_address') as geocode:
+            self.app.perform('county-save', {'id': item.id, 'county': 'Franklin'})
+            row = self.app.state()['records'][0]
+            self.assertEqual(row['residence']['county'], 'Franklin')
+            self.assertEqual(row['person'], RECORD)
+            self.assertEqual(row['status'], 'pending')
+            geocode.assert_not_called()
+        self.post.assert_not_called()
+        self.app.perform('send', self.batch_data())
+        self.assertNotIn('county', json.dumps(self.post.call_args.args[0]))
+        self.assertEqual(self.app.state()['records'][0]['residence']['county'], 'Franklin')
+
+    def test_county_lookup_requires_opt_in_and_errors_do_not_change_submission_state(self):
+        item = self.seed()
+        with patch.object(local_app, 'county_from_address', side_effect=local_app.CountyLookupError('County not found.')) as geocode:
+            with self.assertRaisesRegex(ValueError, 'Enable Census'):
+                self.app.perform('county-lookup', {'id': item.id})
+            geocode.assert_not_called()
+            self.app.settings.save({**self.data, 'county_lookup': 'census'})
+            with self.assertRaises(local_app.CountyLookupError):
+                self.app.perform('county-lookup', {'id': item.id})
+        row = self.app.state()['records'][0]
+        self.assertEqual(row['status'], 'pending')
+        self.assertEqual(row['residence'], {})
+        self.post.assert_not_called()
+
+    def test_county_reference_recomputes_when_local_changes(self):
+        item = self.seed(person={**RECORD, 'region': 'OH'})
+        self.app.perform('county-save', {'id': item.id, 'county': 'Muskingum'})
+        self.app.settings.save({**self.data, 'residence_local': '1105'})
+        self.assertEqual(self.app.state()['records'][0]['jurisdiction']['status'], 'inside')
+        self.app.settings.save({**self.data, 'residence_local': '999'})
+        result = self.app.state()['records'][0]['jurisdiction']
+        self.assertEqual(result['status'], 'unavailable')
+        self.assertEqual(result['note'], '')
+
+    def test_import_county_lookup_is_optional_cached_and_failure_is_nonblocking(self):
+        first = self.seed(family='first')
+        self.app.perform('county-save', {'id': first.id, 'county': 'Manual county'})
+        self.seed(family='second', person={**RECORD, 'given_name': 'Second'})
+        self.seed(family='third', person={**RECORD, 'given_name': 'Third'})
+        found = {'county': 'Licking County', 'region': RECORD['region'].upper(), 'source': 'census', 'matched_address': 'Public test address'}
+        with patch.object(local_app, 'import_downloads', side_effect=lambda *args: ImportSummary()), patch.object(local_app, 'county_from_address', side_effect=[found, local_app.CountyLookupError('Unmatched')]) as geocode:
+            self.app.perform('import', {})
+            geocode.assert_not_called()
+            self.app.settings.save({**self.data, 'county_lookup': 'census'})
+            message = self.app.perform('import', {})
+            self.assertEqual(geocode.call_count, 2)
+        self.assertIn('1 counties found', message)
+        rows = self.app.state()['records']
+        self.assertTrue(all(row['status'] == 'pending' for row in rows))
+        self.assertEqual(next(row for row in rows if row['id'] == first.id)['residence']['source'], 'manual')
+        self.assertEqual(sum(bool(row['residence']) for row in rows), 2)
+        self.post.assert_not_called()
+
+    def test_address_correction_invalidates_county_and_old_record_cannot_be_annotated(self):
+        item = self.seed(held=True)
+        self.app.perform('county-save', {'id': item.id, 'county': 'Franklin'})
+        self.app.perform('review-edit', {'id': item.id, 'person': {**RECORD, 'address_line_1': '20 New Street'}})
+        self.assertEqual(self.app.state()['records'][0]['residence'], {})
+        with self.assertRaisesRegex(ValueError, 'changed'):
+            self.app.perform('county-save', {'id': item.id, 'county': 'Franklin'})
+        self.post.assert_not_called()
+
+    def test_preview_and_check_only_do_not_submit(self):
+        self.seed()
+        snapshot = self.app.state()
+        self.lookup.assert_not_called()
+        self.app.perform('check', self.batch_data())
+        self.post.assert_not_called()
+        self.assertEqual(self.app.state()['records'][0]['status'], 'pending')
+        snapshot['records'][0]['person']['email'] = 'changed@example.test'
+        self.assertEqual(self.app.state()['records'][0]['person']['email'], RECORD['email'])
+
+    def test_send_checks_again_and_stores_receipt(self):
+        self.seed()
+        self.app.perform('check', self.batch_data())
+        self.app.perform('send', self.batch_data())
+        self.assertEqual(self.lookup.call_count, 2)
+        self.post.assert_called_once()
+        row = self.app.state()['records'][0]
+        self.assertEqual(row['status'], 'sent')
+        self.assertIn('identifiers', row['result'])
+        self.app.perform('send', self.batch_data())
+        self.post.assert_called_once()
+
+    def test_changed_batch_destination_and_missing_confirmation_block_posts(self):
+        self.seed()
+        data = self.batch_data()
+        for invalid in ({**data, 'ids': []}, {**data, 'destination': {}}, {**data, 'confirmed': False}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                self.app.perform('send', invalid)
+        self.post.assert_not_called()
+        self.lookup.assert_not_called()
+
+    def test_matched_person_is_held_and_other_person_can_send(self):
+        self.seed()
+        self.seed(person={**RECORD, 'given_name': 'Other'}, family='second')
+        self.lookup.side_effect = [EXISTING, CLEAR]
+        self.app.perform('send', self.batch_data())
+        self.assertEqual(sorted(row['status'] for row in self.app.state()['records']), ['review','sent'])
+        self.post.assert_called_once()
+
+    def test_lookup_failure_never_posts_and_post_timeout_is_held(self):
+        self.seed()
+        self.lookup.side_effect = LookupError('Lookup unavailable.')
+        with self.assertRaises(LookupError):
+            self.app.perform('send', self.batch_data())
+        self.post.assert_not_called()
+        self.lookup.side_effect = None
+        self.post.side_effect = requests.Timeout('private URL')
+        with self.assertRaises(requests.Timeout):
+            self.app.perform('send', self.batch_data())
+        row = self.app.state()['records'][0]
+        self.assertEqual(row['status'], 'uncertain')
+        self.assertTrue(row['related_uncertain'])
+        self.app.perform('send', self.batch_data())
+        self.post.assert_called_once()
+
+    def test_review_requires_displayed_fresh_check_and_explicit_acknowledgment(self):
+        item = self.seed(held=True)
+        data = self.review_data(item)
+        with self.assertRaises(ValueError):
+            self.app.perform('review-send', data)
+        self.app.perform('review-check', {'id':item.id})
+        with self.assertRaises(ValueError):
+            self.app.perform('review-send', {**data, 'checked':False})
+        self.post.assert_not_called()
+        self.app.perform('review-check', {'id':item.id})
+        self.app.perform('review-send', data)
+        self.post.assert_called_once()
+        self.assertEqual(self.app.state()['records'][0]['status'], 'sent')
+
+    def test_changed_review_result_requires_another_human_review(self):
+        item = self.seed(held=True)
+        self.app.perform('review-check', {'id':item.id})
+        self.lookup.return_value = AMBIGUOUS
+        with self.assertRaisesRegex(ValueError, 'changed'):
+            self.app.perform('review-send', self.review_data(item))
+        self.post.assert_not_called()
+        self.assertEqual(self.app.state()['records'][0]['lookup']['outcome'], 'needs_review')
+
+    def test_review_credential_change_revokes_approval(self):
+        item = self.seed(held=True)
+        self.app.perform('review-check', {'id':item.id})
+        self.app.perform('settings', {**self.data, 'api_key':'new-key'})
+        with self.assertRaises(ValueError):
+            self.app.perform('review-send', self.review_data(item))
+        self.post.assert_not_called()
+
+    def test_review_approval_expires_and_related_receipt_blocks_creation(self):
+        item = self.seed(held=True)
+        self.app.perform('review-check', {'id':item.id})
+        self.app.approvals[item.id]['at'] -= 601
+        with self.assertRaises(ValueError):
+            self.app.perform('review-send', self.review_data(item))
+        self.app.perform('review-check', {'id':item.id})
+        with patch.object(RecordQueue, 'review_details', return_value={'related_sent':True, 'related_uncertain':False}):
+            with self.assertRaisesRegex(ValueError, 'already sent'):
+                self.app.perform('review-send', self.review_data(item))
+        self.post.assert_not_called()
+
+    def test_stop_cannot_interrupt_a_job_or_allow_new_jobs_after_closing(self):
+        self.app.job['running'] = True
+        with self.assertRaises(ValueError):
+            self.app.stop()
+        self.assertFalse(self.app.stopping)
+        self.app.job['running'] = False
+        self.app.stop()
+        with self.assertRaisesRegex(ValueError, 'closing'):
+            self.app.start('import', {})
+
+    def test_reconcile_existing_person_updates_local_queue_without_post(self):
+        item = self.seed()
+        with RecordQueue(self.app.queue_dir) as queue:
+            queue.record_lookup(item, CLEAR.as_history(self.config))
+            queue.begin_send(item)
+            queue.mark_uncertain(item, 'Unconfirmed receipt.')
+        self.lookup.return_value = EXISTING
+        data = {**self.review_data(item), 'destination':self.config.destination}
+        with self.assertRaises(ValueError):
+            self.app.perform('review-reconcile', {**data, 'checked':False})
+        self.app.perform('review-reconcile', data)
+        self.post.assert_not_called()
+        self.assertEqual(self.app.state()['records'][0]['status'], 'sent')
+
+    def test_review_corrections_and_discard_preserve_history(self):
+        item = self.seed(held=True)
+        self.app.perform('review-edit', {'id':item.id, 'person':{**RECORD,'email':'corrected@example.test'}})
+        rows = self.app.state()['records']
+        self.assertEqual(len(rows), 1)
+        self.assertNotEqual(rows[0]['id'], item.id)
+        self.assertEqual(rows[0]['person']['email'], 'corrected@example.test')
+        self.app.perform('review-discard', {'id':rows[0]['id'],'reason':'Duplicate import.'})
+        self.assertEqual(self.app.state()['records'], [])
+        self.post.assert_not_called()
+
+    def test_background_job_prevents_overlap_and_reports_sanitized_errors(self):
+        entered, release = threading.Event(), threading.Event()
+        def perform(*args):
+            entered.set()
+            release.wait(3)
+            raise requests.ConnectionError('secret query token')
+        with patch.object(self.app, 'perform', side_effect=perform):
+            self.app.start('test', {})
+            self.assertTrue(entered.wait(2))
+            with self.assertRaisesRegex(ValueError, 'already running'):
+                self.app.start('test', {})
+            release.set()
+            # Acquire the operation lock to wait until the mocked call returns.
+            with self.app.lock:
+                pass
+        # Complete the worker synchronously for deterministic error assertions.
+        with patch.object(self.app, 'perform', side_effect=requests.ConnectionError('secret query token')):
+            self.app._work('test', {})
+        self.assertTrue(self.app.status()['error'])
+        self.assertNotIn('secret', self.app.status()['message'])
+
+
+class HandlerTests(unittest.TestCase):
+    """Exercise real handler routing without binding a socket in unit tests."""
+    def handler(self, *, path='/api/state', token='session-secret', host='127.0.0.1:8765', origin=None, data=None):
+        handler = object.__new__(local_app.Handler)
+        handler.path = path
+        handler.headers = {'Host':host, 'X-App-Token':token, 'Content-Type':'application/json'}
+        if origin is not None:
+            handler.headers['Origin'] = origin
+        body = json.dumps(data or {}).encode()
+        handler.headers['Content-Length'] = str(len(body))
+        handler.rfile = io.BytesIO(body)
+        handler.server = Mock(origin='http://127.0.0.1:8765', token='session-secret')
+        handler.server.app.status.return_value = {'running':False}
+        handler.server.app.state.return_value = {'records':[]}
+        handler.reply = Mock()
+        return handler
+
+    def test_api_rejects_other_origins_hosts_and_missing_tokens(self):
+        for args in ({'token':''}, {'origin':'https://evil.example'}, {'host':'evil.example:8765'}):
+            handler = self.handler(**args)
+            handler.do_GET()
+            self.assertEqual(handler.reply.call_args.args[0], 403)
+            handler.server.app.state.assert_not_called()
+
+    def test_authorized_api_and_static_allowlist(self):
+        handler = self.handler()
+        handler.do_GET()
+        self.assertEqual(handler.reply.call_args.args[0],200)
+        for path in ('/.env','/../.env','/composed_info/.queue-state.json'):
+            handler = self.handler(path=path)
+            handler.do_GET()
+            self.assertEqual(handler.reply.call_args.args[0],404)
+
+    def test_post_requires_authorization_and_limits_request_body(self):
+        handler = self.handler(path='/api/send', token='')
+        handler.do_POST()
+        handler.server.app.start.assert_not_called()
+        handler = self.handler(path='/api/settings')
+        handler.headers['Content-Length']='70000'
+        handler.do_POST()
+        handler.server.app.start.assert_not_called()
+        self.assertEqual(handler.reply.call_args.args[0],400)
+
+    def test_running_job_blocks_state_and_quit(self):
+        handler = self.handler()
+        handler.server.app.status.return_value={'running':True}
+        handler.do_GET()
+        self.assertEqual(handler.reply.call_args.args[0],409)
+        handler.path='/api/quit'
+        handler.server.app.stop.side_effect=ValueError('Wait for the current operation.')
+        handler.do_POST()
+        handler.server.shutdown.assert_not_called()
+        self.assertEqual(handler.reply.call_args.args[0],400)
