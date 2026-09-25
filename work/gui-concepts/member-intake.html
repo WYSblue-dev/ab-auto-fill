@@ -1,0 +1,294 @@
+<div id="member-intake-concept" aria-label="Member intake desktop concept">
+  <style>
+    #member-intake-concept { --mi-bg: light-dark(#f3f6fb,#151d2a); --mi-panel: light-dark(#ffffff,#202b3b); --mi-text: light-dark(#17243d,#e5ecf8); --mi-muted: light-dark(#52617b,#b1bfd5); --mi-border: light-dark(#dce3ee,#3e4d64); --mi-accent: light-dark(#2454cf,#98b7ff); --mi-on-accent: light-dark(#ffffff,#112651); --mi-tint: light-dark(#edf2ff,#293e64); --mi-warn: light-dark(#865109,#ffd08a); --mi-warn-bg: light-dark(#fff4dc,#493820); --mi-good: light-dark(#136451,#8fe1c5); --mi-good-bg: light-dark(#e7f5ef,#1e443d); --mi-space: 20px; color:var(--mi-text); background:var(--mi-bg); border:1px solid var(--mi-border); border-radius:16px; overflow:hidden; font-family:system-ui,sans-serif; }
+    #member-intake-concept * { box-sizing:border-box; }
+    #member-intake-concept [hidden] { display:none !important; }
+    #member-intake-concept h2, #member-intake-concept h3, #member-intake-concept p { margin:0; font-weight:400; }
+    #member-intake-concept h2, #member-intake-concept h3, #member-intake-concept strong { font-weight:500; }
+    #member-intake-concept button, #member-intake-concept input { font:inherit; }
+    #member-intake-concept button { color:var(--mi-text); background:var(--mi-panel); border:1px solid var(--mi-border); border-radius:8px; padding:10px 14px; cursor:pointer; }
+    #member-intake-concept button:disabled { opacity:.55; cursor:default; }
+    #member-intake-concept button:hover:not(:disabled) { border-color:var(--mi-accent); }
+    #member-intake-concept .mi-primary { background:var(--mi-accent); color:var(--mi-on-accent); border-color:var(--mi-accent); }
+    #member-intake-concept .mi-header, #member-intake-concept .mi-bar, #member-intake-concept .mi-footer { display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:space-between; padding:16px 24px; background:var(--mi-panel); }
+    #member-intake-concept .mi-header { border-bottom:1px solid var(--mi-border); }
+    #member-intake-concept .mi-brand { display:flex; align-items:center; gap:12px; }
+    #member-intake-concept .mi-brand > i, #member-intake-concept .mi-brand > svg { color:var(--mi-accent); }
+    #member-intake-concept .mi-subtle { color:var(--mi-muted); }
+    #member-intake-concept .mi-context { display:grid; gap:4px; }
+    #member-intake-concept .mi-pill { display:inline-block; padding:4px 9px; border-radius:6px; font-weight:500; }
+    #member-intake-concept .mi-warning { color:var(--mi-warn); background:var(--mi-warn-bg); }
+    #member-intake-concept .mi-good { color:var(--mi-good); background:var(--mi-good-bg); }
+    #member-intake-concept .mi-neutral { color:var(--mi-muted); background:var(--mi-bg); }
+    #member-intake-concept .mi-ready { color:var(--mi-accent); background:var(--mi-tint); }
+    #member-intake-concept .mi-steps { display:flex; gap:8px; flex-wrap:wrap; }
+    #member-intake-concept .mi-steps button[aria-current="step"] { background:var(--mi-tint); color:var(--mi-accent); border-color:var(--mi-accent); }
+    #member-intake-concept .mi-layout { display:grid; grid-template-columns:215px minmax(0,1fr); border-top:1px solid var(--mi-border); }
+    #member-intake-concept aside { padding:var(--mi-space) 14px; border-right:1px solid var(--mi-border); }
+    #member-intake-concept .mi-list { display:grid; gap:10px; margin-top:16px; }
+    #member-intake-concept .mi-person { display:grid; gap:10px; text-align:left; width:100%; }
+    #member-intake-concept .mi-person[aria-pressed="true"] { border-color:var(--mi-accent); background:var(--mi-tint); }
+    #member-intake-concept main { padding:var(--mi-space); min-width:0; }
+    #member-intake-concept .mi-detail-top { display:flex; gap:12px; justify-content:space-between; align-items:center; flex-wrap:wrap; margin-bottom:20px; }
+    #member-intake-concept .mi-columns { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
+    #member-intake-concept .mi-pane { background:var(--mi-panel); border:1px solid var(--mi-border); border-radius:10px; padding:var(--mi-space); min-width:0; }
+    #member-intake-concept .mi-pane h3 { margin-bottom:16px; }
+    #member-intake-concept dl { margin:0; display:grid; gap:16px; }
+    #member-intake-concept dt { color:var(--mi-muted); margin-bottom:4px; }
+    #member-intake-concept dd { margin:0; overflow-wrap:anywhere; }
+    #member-intake-concept .mi-match-row { display:grid; gap:6px; padding:12px 0; border-bottom:1px solid var(--mi-border); }
+    #member-intake-concept .mi-match-row:last-child { border:0; }
+    #member-intake-concept .mi-source { margin-top:18px; overflow-wrap:anywhere; color:var(--mi-muted); }
+    #member-intake-concept .mi-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; }
+    #member-intake-concept .mi-footer { border-top:1px solid var(--mi-border); }
+    #member-intake-concept input[type="email"], #member-intake-concept input[type="text"] { color:var(--mi-text); background:var(--mi-bg); border:1px solid var(--mi-border); padding:10px; border-radius:6px; width:100%; }
+    #member-intake-concept .mi-confirm { display:flex; gap:10px; align-items:flex-start; margin-top:20px; padding:14px; border-radius:8px; background:var(--mi-warn-bg); color:var(--mi-warn); }
+    #member-intake-concept .mi-confirm input { margin-top:4px; }
+    #member-intake-concept .mi-import { display:grid; gap:20px; padding:32px; }
+    #member-intake-concept .mi-modal { background:var(--mi-panel); margin:20px; padding:24px; border:2px solid var(--mi-accent); border-radius:12px; display:grid; gap:16px; }
+    #member-intake-concept .mi-modal ul { margin:0; padding-left:20px; }
+    #member-intake-concept .mi-overview { padding:var(--mi-space); display:grid; gap:18px; }
+    #member-intake-concept .mi-overview-top { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
+    #member-intake-concept .mi-overview-top > div { display:grid; gap:8px; }
+    #member-intake-concept .mi-table { width:100%; border-collapse:collapse; background:var(--mi-panel); }
+    #member-intake-concept .mi-table th, #member-intake-concept .mi-table td { text-align:left; padding:16px; vertical-align:top; border-bottom:1px solid var(--mi-border); overflow-wrap:anywhere; }
+    #member-intake-concept .mi-table th { font-weight:500; color:var(--mi-muted); }
+    #member-intake-concept .mi-table td > span { display:block; margin-top:5px; }
+    #member-intake-concept .mi-table details { margin-top:8px; }
+    #member-intake-concept .mi-table details dl { margin-top:12px; }
+    #member-intake-concept .mi-results-summary { display:flex; flex-wrap:wrap; gap:10px; }
+    #member-intake-concept #mi-notice { padding:0 24px 16px; color:var(--mi-muted); overflow-wrap:anywhere; }
+    @media(max-width:760px) { #member-intake-concept .mi-layout { grid-template-columns:1fr; } #member-intake-concept aside { border-right:0; border-bottom:1px solid var(--mi-border); } #member-intake-concept .mi-list { grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); } }
+    @media(max-width:540px) { #member-intake-concept .mi-columns { grid-template-columns:1fr; } #member-intake-concept .mi-header, #member-intake-concept .mi-bar, #member-intake-concept .mi-footer { padding:16px; } #member-intake-concept main { padding:14px; } }
+    @media(max-width:650px) { #member-intake-concept .mi-table thead { display:none; } #member-intake-concept .mi-table tr { display:grid; grid-template-columns:1fr; border-bottom:1px solid var(--mi-border); } #member-intake-concept .mi-table td { display:block; border:0; padding:10px 16px; } }
+  </style>
+  <header class="mi-header">
+    <div class="mi-brand"><i data-lucide="folder-check" aria-hidden="true"></i><div><h2>Member intake</h2><span class="mi-subtle">Paperwork to Action Builder</span></div></div>
+    <div class="mi-context"><span>Example local · Membership campaign</span><span class="mi-subtle">Design concept · Sample data</span></div>
+  </header>
+  <nav class="mi-bar" aria-label="Import workflow">
+    <div class="mi-steps">
+      <button type="button" id="mi-import-tab">1 · Import</button>
+      <button type="button" id="mi-review-tab" aria-current="step">2 · Batch preview</button>
+      <button type="button" id="mi-send-tab" disabled>3 · Results</button>
+      <button type="button" id="mi-held-tab" hidden>Needs review</button>
+    </div>
+    <span class="mi-subtle" id="mi-total">3 people imported</span>
+  </nav>
+  <section id="mi-import-panel" class="mi-import" hidden>
+    <h2>Find downloaded paperwork</h2>
+    <dl><div><dt>Folder</dt><dd>Downloads</dd></div><div><dt>Filename ending</dt><dd>ORGANIZED.pdf</dd></div></dl>
+    <div><button type="button" class="mi-primary" id="mi-scan">Find paperwork</button></div>
+  </section>
+  <section class="mi-overview" id="mi-preview-panel">
+    <div class="mi-overview-top"><div><h2 id="mi-preview-title">Paperwork is ready to process</h2><p class="mi-subtle">One batch action checks Action Builder and submits everyone who passes.</p></div></div>
+    <table class="mi-table"><thead><tr><th>Person and paperwork</th><th>Contact information</th><th>Status</th></tr></thead><tbody id="mi-preview-rows"></tbody></table>
+    <p id="mi-preview-empty" class="mi-subtle" hidden>No records are waiting to be submitted. Completed submissions are in Results.</p>
+    <p class="mi-subtle">Flagged records stay held. Individual approval is only needed for those records.</p>
+  </section>
+  <section class="mi-overview" id="mi-results-panel" hidden>
+    <div class="mi-overview-top"><div><h2>Batch results</h2><p class="mi-subtle">Submitted people are complete. Opening their details is optional.</p></div><button type="button" id="mi-review-held">Review flagged people</button></div>
+    <div class="mi-results-summary" id="mi-results-counts" role="status" aria-live="polite"></div>
+    <table class="mi-table"><thead><tr><th>Person</th><th>Result</th><th>Details</th></tr></thead><tbody id="mi-result-rows"></tbody></table>
+  </section>
+  <div class="mi-layout" id="mi-review-panel" hidden>
+    <aside aria-label="Imported people">
+      <strong id="mi-sidebar-label">Needs your review</strong>
+      <div class="mi-list" id="mi-people"></div>
+    </aside>
+    <main>
+      <div class="mi-detail-top"><h2 id="mi-name">Morgan Example</h2><span id="mi-status" class="mi-pill mi-warning">Needs review</span></div>
+      <div class="mi-columns">
+        <section class="mi-pane" aria-label="Local contact information">
+          <h3>From the paperwork</h3>
+          <dl>
+            <div><dt>Email</dt><dd id="mi-email">morgan@example.test</dd><dd id="mi-email-editor" hidden><label for="mi-email-input">Corrected email</label><input type="email" id="mi-email-input" value="morgan@example.test"></dd></div>
+            <div><dt>Phone</dt><dd id="mi-phone">(202) 555-0123</dd></div>
+            <div><dt>Address</dt><dd id="mi-address">123 Example Street<br>Washington, DC 20001</dd></div>
+          </dl>
+          <div class="mi-actions"><button type="button" id="mi-edit">Edit these details</button></div>
+        </section>
+        <section class="mi-pane" aria-label="Action Builder lookup result">
+          <h3>Action Builder check</h3>
+          <div id="mi-match">
+            <span class="mi-pill mi-warning">Possible existing person</span>
+            <div class="mi-match-row"><strong>Email matches</strong><span class="mi-subtle">This address found an existing record.</span></div>
+            <div class="mi-match-row"><strong>Phone differs or is missing</strong><span class="mi-subtle">Check the existing person's details.</span></div>
+            <details class="mi-match-row"><summary>Existing record ID</summary><span style="overflow-wrap:anywhere">action_builder:11111111-1111-4111-8111-111111111111</span></details>
+          </div>
+          <div id="mi-clear" hidden><span class="mi-pill mi-good">No email or phone matches</span><div class="mi-match-row">Checks run again before sending.</div></div>
+          <div id="mi-recheck" hidden><span class="mi-pill mi-warning">Details changed</span><div class="mi-match-row">Run the checks again before sending.</div></div>
+          <div id="mi-sent" hidden><span class="mi-pill mi-good">Submission confirmed</span><div class="mi-match-row">No further review is required.</div><div class="mi-match-row"><strong>Action Builder person ID</strong><span id="mi-receipt-id" style="overflow-wrap:anywhere"></span></div></div>
+        </section>
+      </div>
+      <div class="mi-source" id="mi-source">Source: Morgan-Example-ORGANIZED.pdf</div>
+      <label class="mi-confirm" id="mi-override"><input id="mi-checked" type="checkbox"><span>I checked the existing record and confirmed this is a different person.</span></label>
+      <div class="mi-actions" id="mi-review-actions">
+        <button type="button" id="mi-keep">Keep for later</button>
+        <button type="button" id="mi-discard">Discard this import</button>
+        <button type="button" class="mi-primary" id="mi-new-person" disabled>Review sending as a new person</button>
+        <button type="button" id="mi-recheck-button" hidden>Check revised details</button>
+      </div>
+    </main>
+  </div>
+  <section class="mi-modal" id="mi-confirm-panel" role="region" aria-label="Confirm sample action" hidden>
+    <h2 id="mi-confirm-title">Review this submission</h2>
+    <p id="mi-confirm-destination">Destination: Example local · Membership campaign</p>
+    <ul id="mi-confirm-names"></ul>
+    <label id="mi-reason-label" hidden>Reason for creating a separate person<input type="text" id="mi-reason" style="display:block;width:100%;padding:10px;margin-top:8px"></label>
+    <span class="mi-subtle" id="mi-confirm-note">Design preview only. No Action Builder request will be made.</span>
+    <div class="mi-actions"><button type="button" id="mi-cancel">Back to review</button><button type="button" class="mi-primary" id="mi-confirm-button">Confirm sample submission</button></div>
+  </section>
+  <footer class="mi-footer"><span id="mi-footer-status">Destination: Example local · Membership campaign</span><button type="button" class="mi-primary" id="mi-batch-send">Check and submit batch</button></footer>
+  <div id="mi-notice" role="status" aria-live="polite"></div>
+  <script>
+    (() => {
+      const root = document.getElementById('member-intake-concept');
+      const el = (id) => root.querySelector('#' + id);
+      const people = [
+        {name:'Morgan Example', email:'morgan@example.test', phone:'(202) 555-0123', status:'pending', lookup:'match', receipt:'action_builder:22222222-2222-4222-8222-222222222222'},
+        {name:'Taylor Example', email:'taylor@example.test', phone:'(202) 555-0145', status:'pending', lookup:'clear', receipt:'action_builder:33333333-3333-4333-8333-333333333333'},
+        {name:'Casey Example', email:'casey@example.test', phone:'(202) 555-0187', status:'pending', lookup:'clear', receipt:'action_builder:44444444-4444-4444-8444-444444444444'}
+      ];
+      let selected = 0, editing = false, action = '', view = 'preview', batchRun = false;
+      const appearance = {accent:'Blue', spacing:'Comfortable'};
+      const isHeld = p => p.status === 'review' || p.status === 'changed';
+      const labels = {pending:'Ready to be submitted', review:'Needs review', changed:'Check again', sent:'Submitted', discarded:'Discarded'};
+      function badge(text, kind) { const node=document.createElement('span'); node.className='mi-pill mi-'+kind; node.textContent=text; return node; }
+      function notice(message) { el('mi-notice').textContent = message; }
+      function showHeld(index) {
+        const next = typeof index === 'number' ? index : people.findIndex(isHeld);
+        if(next === -1) { notice('No sample records need review.'); return; }
+        selected=next; editing=false; action=''; el('mi-confirm-panel').hidden=true; el('mi-checked').checked=false; view='review'; notice(''); render();
+      }
+      function renderLists() {
+        el('mi-preview-rows').replaceChildren();
+        el('mi-result-rows').replaceChildren();
+        people.forEach((person,index) => {
+          if(person.status !== 'discarded' && person.status !== 'sent') {
+            const row=document.createElement('tr');
+            const name=document.createElement('td');
+            const strong=document.createElement('strong'); strong.textContent=person.name;
+            const source=document.createElement('span'); source.className='mi-subtle'; source.textContent=person.name.replaceAll(' ','-')+'-ORGANIZED.pdf'; name.append(strong,source);
+            const contact=document.createElement('td');
+            const email=document.createElement('span'); email.textContent=person.email;
+            const phone=document.createElement('span'); phone.textContent=person.phone;
+            const details=document.createElement('details'); const summary=document.createElement('summary'); summary.textContent='More contact details';
+            const address=document.createElement('div'); address.textContent='123 Example Street, Washington, DC 20001 · Middle initial: A'; details.append(summary,address); contact.append(email,phone,details);
+            const state=document.createElement('td'); state.append(badge(labels[person.status],isHeld(person)?'warning':'ready'));
+            row.append(name,contact,state); el('mi-preview-rows').append(row);
+          }
+        });
+        el('mi-preview-empty').hidden = el('mi-preview-rows').children.length > 0;
+        el('mi-preview-title').textContent = people.some(p=>p.status==='pending') ? 'Paperwork is ready to process' : 'No new candidates to submit';
+        people.map((person,index)=>({person,index})).sort((a,b)=>(a.person.status==='sent'?0:1)-(b.person.status==='sent'?0:1)).forEach(({person,index})=>{
+          const row=document.createElement('tr');
+          const name=document.createElement('td'); name.textContent=person.name;
+          const result=document.createElement('td'); result.append(badge(labels[person.status],isHeld(person)?'warning':person.status==='sent'?'good':'neutral'));
+          const context=document.createElement('span'); context.className='mi-subtle'; context.textContent=person.status==='sent'?'Confirmed in this sample batch':isHeld(person)?'Possible existing person — not submitted':person.status==='discarded'?'Removed from this import':'Check has not run'; result.append(context);
+          const details=document.createElement('td');
+          if(person.status==='sent'||isHeld(person)) {
+            const button=document.createElement('button'); button.type='button'; button.textContent=person.status==='sent'?'View receipt':'Review person';
+            button.onclick=()=>{ if(isHeld(person)) showHeld(index); else { selected=index; editing=false; view='detail'; notice('Viewing a completed sample submission. No approval is needed.'); render(); } }; details.append(button);
+          }
+          row.append(name,result,details); el('mi-result-rows').append(row);
+        });
+        const sent=people.filter(p=>p.status==='sent').length;
+        const held=people.filter(isHeld).length;
+        el('mi-results-counts').replaceChildren(badge(sent+' submitted','good'),badge(held+' need review',held?'warning':'neutral'));
+        el('mi-review-held').textContent='Review '+held+' flagged '+(held===1?'person':'people');
+        el('mi-review-held').hidden=held===0;
+      }
+      function openAction(next) {
+        action = next;
+        const discard = next === 'discard';
+        el('mi-confirm-panel').hidden = false;
+        el('mi-review-panel').hidden = true;
+        el('mi-import-panel').hidden = true;
+        el('mi-confirm-title').textContent = discard ? 'Discard this import?' : 'Review this submission';
+        el('mi-confirm-destination').hidden = discard;
+        el('mi-confirm-names').replaceChildren();
+        const names = [people[selected]];
+        names.forEach(p => { const li=document.createElement('li'); li.textContent=p.name; el('mi-confirm-names').append(li); });
+        el('mi-reason-label').hidden = next !== 'single';
+        el('mi-reason').value = '';
+        el('mi-confirm-button').disabled = next === 'single';
+        el('mi-confirm-button').textContent = discard ? 'Discard sample import' : 'Confirm sample submission';
+        el('mi-confirm-note').textContent = discard ? 'Remove this import from the list. The source PDF and existing Action Builder person stay unchanged.' : 'Design preview only. No Action Builder request will be made.';
+        notice('');
+      }
+      function render() {
+        root.style.setProperty('--mi-space', appearance.spacing === 'Compact' ? '14px' : '20px');
+        root.style.setProperty('--mi-accent', appearance.accent === 'Teal' ? 'light-dark(#126c69,#90d7cc)' : 'light-dark(#2454cf,#98b7ff)');
+        root.style.setProperty('--mi-tint', appearance.accent === 'Teal' ? 'light-dark(#eaf6f3,#253f40)' : 'light-dark(#edf2ff,#293e64)');
+        const pending = people.filter(p => p.status === 'pending').length;
+        const held = people.filter(isHeld).length;
+        el('mi-total').textContent = people.filter(p => p.status !== 'discarded').length + ' people imported';
+        el('mi-footer-status').textContent = 'Destination: Example local · Membership campaign';
+        el('mi-batch-send').textContent = 'Check and submit batch';
+        el('mi-batch-send').disabled = pending === 0 || !!action;
+        el('mi-batch-send').hidden = view !== 'preview' || !!action;
+        el('mi-held-tab').hidden = held === 0;
+        el('mi-held-tab').textContent = 'Needs review ('+held+')';
+        el('mi-send-tab').disabled = !batchRun;
+        el('mi-sidebar-label').textContent = view==='detail'?'Completed submissions':'Needs your review';
+        renderLists();
+        el('mi-people').replaceChildren();
+        people.forEach((p,i) => {
+          if (view==='detail' ? p.status!=='sent' : !isHeld(p)) return;
+          const button = document.createElement('button'); button.type='button'; button.className='mi-person'; button.setAttribute('aria-pressed', String(i===selected));
+          const name = document.createElement('strong'); name.textContent=p.name;
+          const status = document.createElement('span'); status.className='mi-pill ' + (p.status==='review'||p.status==='changed' ? 'mi-warning':'mi-good'); status.textContent=labels[p.status];
+          button.append(name,status); button.addEventListener('click',()=>{ selected=i; editing=false; el('mi-checked').checked=false; notice(''); render(); }); el('mi-people').append(button);
+        });
+        const person = people[selected];
+        el('mi-name').textContent=person.name; el('mi-email').textContent=person.email; el('mi-phone').textContent=person.phone;
+        el('mi-email-input').value=person.email;
+        el('mi-status').textContent=labels[person.status]; el('mi-status').className='mi-pill ' + (person.status==='review'||person.status==='changed' ? 'mi-warning':'mi-good');
+        el('mi-receipt-id').textContent=person.receipt;
+        el('mi-source').textContent='Source: '+person.name.replaceAll(' ','-')+'-ORGANIZED.pdf';
+        el('mi-email').hidden=editing; el('mi-email-editor').hidden=!editing; el('mi-edit').textContent=editing?'Save corrected email':'Edit these details';
+        el('mi-edit').disabled=person.status==='sent'||person.status==='discarded';
+        el('mi-match').hidden=person.status!=='review'; el('mi-clear').hidden=true; el('mi-recheck').hidden=person.status!=='changed'; el('mi-sent').hidden=person.status!=='sent';
+        el('mi-override').hidden=person.status!=='review'; el('mi-new-person').hidden=person.status!=='review'; el('mi-new-person').disabled=!el('mi-checked').checked||editing;
+        el('mi-review-actions').hidden=person.status==='sent'||person.status==='discarded';
+        el('mi-recheck-button').hidden=person.status!=='changed';
+        el('mi-review-panel').hidden=(view!=='review'&&view!=='detail')||!!action; el('mi-import-panel').hidden=view!=='import'||!!action;
+        el('mi-preview-panel').hidden=view!=='preview'||!!action; el('mi-results-panel').hidden=view!=='results'||!!action;
+        el('mi-import-tab').setAttribute('aria-current',view==='import'?'step':'false'); el('mi-review-tab').setAttribute('aria-current',view==='preview'&&!action?'step':'false'); el('mi-send-tab').setAttribute('aria-current',view==='results'||view==='detail'?'step':'false'); el('mi-held-tab').setAttribute('aria-current',view==='review'?'step':'false');
+      }
+      el('mi-import-tab').onclick=()=>{ action=''; el('mi-confirm-panel').hidden=true; view='import'; render(); };
+      el('mi-review-tab').onclick=()=>{ action=''; el('mi-confirm-panel').hidden=true; view='preview'; render(); };
+      el('mi-send-tab').onclick=()=>{ action=''; el('mi-confirm-panel').hidden=true; view='results'; render(); };
+      el('mi-held-tab').onclick=()=>showHeld(); el('mi-review-held').onclick=()=>showHeld();
+      el('mi-scan').onclick=()=>{ view='preview'; notice('Sample scan complete. Related paperwork is grouped; no real files were read.'); render(); };
+      el('mi-batch-send').onclick=()=>{
+        people.filter(p=>p.status==='pending').forEach(p=>{p.status=p.lookup==='match'?'review':'sent';});
+        batchRun=true; view='results'; notice('Sample batch complete. This concept made no API requests.'); render();
+      };
+      el('mi-checked').onchange=()=>{ el('mi-new-person').disabled=!el('mi-checked').checked||editing; };
+      el('mi-new-person').onclick=()=>{ openAction('single'); render(); };
+      el('mi-discard').onclick=()=>{ openAction('discard'); render(); };
+      el('mi-keep').onclick=()=>{ view='results'; notice('Kept for later review. Completed submissions remain complete.'); render(); };
+      el('mi-edit').onclick=()=>{
+        if(editing) {
+          const input=el('mi-email-input'); if(!input.value.trim()||!input.checkValidity()) { input.reportValidity(); notice('Enter a valid sample email.'); return; }
+          if(people[selected].email!==input.value.trim()) { people[selected].email=input.value.trim(); people[selected].status='changed'; el('mi-checked').checked=false; notice('Sample correction saved. Previous checks no longer apply.'); }
+        }
+        editing=!editing; render();
+      };
+      el('mi-recheck-button').onclick=()=>{ people[selected].status='review'; notice('Sample check complete. A possible existing person still needs review.'); render(); };
+      el('mi-reason').oninput=()=>{ el('mi-confirm-button').disabled=!el('mi-reason').value.trim(); };
+      el('mi-cancel').onclick=()=>{ action=''; el('mi-confirm-panel').hidden=true; view='review'; render(); };
+      el('mi-confirm-button').onclick=()=>{
+        if(action==='single'&&!el('mi-reason').value.trim()) return;
+        if(action==='single') people[selected].status='sent';
+        if(action==='discard') { people[selected].status='discarded'; const next=people.findIndex(p=>p.status!=='discarded'); if(next!==-1) selected=next; }
+        notice(action==='discard'?'Sample import discarded. Original documents stay unchanged.':'Demo complete. No people were sent to Action Builder.');
+        action=''; el('mi-confirm-panel').hidden=true; view='results'; render();
+      };
+      render();
+      if(globalThis.Tweak) { const tweak=new Tweak({container:root,onChange:render}); tweak.addSelect(appearance,'accent',{label:'Accent color',options:['Blue','Teal']}); tweak.addSelect(appearance,'spacing',{label:'Spacing',options:['Comfortable','Compact']}); }
+    })();
+  </script>
+</div>

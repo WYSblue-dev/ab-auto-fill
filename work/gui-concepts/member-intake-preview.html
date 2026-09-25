@@ -1,0 +1,1687 @@
+<!doctype html>
+<html lang="en" data-visualize-standalone>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Member Intake</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Member Intake" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot; data-visualize-standalone&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Member Intake&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, var(--background));
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --blue: light-dark(rgb(51 156 255), rgb(51 156 255));
+  --orange: light-dark(rgb(226 85 7), rgb(251 106 34));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --red: light-dark(rgb(224 46 42), rgb(255 103 100));
+  --purple: light-dark(rgb(146 79 247), rgb(173 123 249));
+  --yellow: light-dark(rgb(255 195 0), rgb(255 210 64));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --icon-size: 16px;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --corner-shape: round;
+  --radius: var(--border-radius-lg, 10px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: var(--visualize-paint-gutter, 0px);
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans) !important;
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: var(--corner-shape);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive &gt; .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align=&quot;right&quot;]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align=&quot;center&quot;]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: var(--corner-shape);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card, .progress) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+hr {
+  width: 100%;
+  height: 1px;
+  margin-block: 6px;
+  border: 0;
+  background: var(--border);
+}
+
+.nav {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.progress {
+  display: flex;
+  height: 8px;
+  margin-block: calc((var(--line-height-normal, 1.5em) - 8px) / 2);
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+
+.progress-bar:only-child {
+  border-radius: var(--radius-full);
+}
+
+.progress-bar {
+  height: 100%;
+  flex-shrink: 0;
+  border: 0;
+  background: var(--viz-series-1);
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.nav-link,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn,
+.nav-link {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover,
+.nav-link:not(:disabled):not([aria-disabled=&quot;true&quot;]):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.nav-pills .nav-link {
+  min-width: 0;
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.nav-justified .nav-link {
+  flex: 1 1 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.nav-pills .nav-link.active {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.btn:disabled,
+.nav-link:disabled,
+.nav-link[aria-disabled=&quot;true&quot;] {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: var(--corner-shape);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: var(--corner-shape);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+  [aria-pressed=&quot;true&quot;],
+  [aria-selected=&quot;true&quot;],
+  .is-selected
+) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible,
+.nav-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .btn,
+  .nav-link,
+  .form-control,
+  .form-select {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Keep small-screen WebKit from zooming when a text field receives focus. */
+  .form-control,
+  .form-select {
+    font-size: max(16px, var(--font-size-normal));
+  }
+
+  .form-control[type=&quot;file&quot;]::file-selector-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .form-control-color[type=&quot;color&quot;] {
+    width: 44px;
+    height: 44px;
+  }
+
+  .form-control:is(
+    [type=&quot;date&quot;],
+    [type=&quot;datetime-local&quot;],
+    [type=&quot;month&quot;],
+    [type=&quot;time&quot;],
+    [type=&quot;week&quot;]
+  ) {
+    min-width: 0;
+    max-width: 100%;
+    padding-block: 8px;
+  }
+
+  .form-check {
+    min-height: 44px;
+    padding-inline: 15px;
+  }
+
+  .form-check-input {
+    position: relative;
+  }
+
+  .form-check-input::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    content: &quot;&quot;;
+    transform: translate(-50%, -50%);
+  }
+
+  .form-check-label {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .form-range {
+    height: 44px;
+    touch-action: pan-y;
+  }
+
+  .form-range::-webkit-slider-runnable-track {
+    height: 44px;
+  }
+
+  .form-range::-moz-range-track {
+    height: 44px;
+  }
+
+  .form-range::-webkit-slider-thumb {
+    margin-top: 12px;
+  }
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+/* Model-authored chart rules can otherwise stretch icons after these styles load. */
+svg.lucide {
+  display: block;
+  width: var(--icon-size) !important;
+  height: var(--icon-size) !important;
+  flex: none;
+  margin: 0 !important;
+  stroke-width: 1.6;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;member-intake-concept&quot; aria-label=&quot;Member intake desktop concept&quot;&gt;
+  &lt;style&gt;
+    #member-intake-concept { --mi-bg: light-dark(#f3f6fb,#151d2a); --mi-panel: light-dark(#ffffff,#202b3b); --mi-text: light-dark(#17243d,#e5ecf8); --mi-muted: light-dark(#52617b,#b1bfd5); --mi-border: light-dark(#dce3ee,#3e4d64); --mi-accent: light-dark(#2454cf,#98b7ff); --mi-on-accent: light-dark(#ffffff,#112651); --mi-tint: light-dark(#edf2ff,#293e64); --mi-warn: light-dark(#865109,#ffd08a); --mi-warn-bg: light-dark(#fff4dc,#493820); --mi-good: light-dark(#136451,#8fe1c5); --mi-good-bg: light-dark(#e7f5ef,#1e443d); --mi-space: 20px; color:var(--mi-text); background:var(--mi-bg); border:1px solid var(--mi-border); border-radius:16px; overflow:hidden; font-family:system-ui,sans-serif; }
+    #member-intake-concept * { box-sizing:border-box; }
+    #member-intake-concept [hidden] { display:none !important; }
+    #member-intake-concept h2, #member-intake-concept h3, #member-intake-concept p { margin:0; font-weight:400; }
+    #member-intake-concept h2, #member-intake-concept h3, #member-intake-concept strong { font-weight:500; }
+    #member-intake-concept button, #member-intake-concept input { font:inherit; }
+    #member-intake-concept button { color:var(--mi-text); background:var(--mi-panel); border:1px solid var(--mi-border); border-radius:8px; padding:10px 14px; cursor:pointer; }
+    #member-intake-concept button:disabled { opacity:.55; cursor:default; }
+    #member-intake-concept button:hover:not(:disabled) { border-color:var(--mi-accent); }
+    #member-intake-concept .mi-primary { background:var(--mi-accent); color:var(--mi-on-accent); border-color:var(--mi-accent); }
+    #member-intake-concept .mi-header, #member-intake-concept .mi-bar, #member-intake-concept .mi-footer { display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:space-between; padding:16px 24px; background:var(--mi-panel); }
+    #member-intake-concept .mi-header { border-bottom:1px solid var(--mi-border); }
+    #member-intake-concept .mi-brand { display:flex; align-items:center; gap:12px; }
+    #member-intake-concept .mi-brand &gt; i, #member-intake-concept .mi-brand &gt; svg { color:var(--mi-accent); }
+    #member-intake-concept .mi-subtle { color:var(--mi-muted); }
+    #member-intake-concept .mi-context { display:grid; gap:4px; }
+    #member-intake-concept .mi-pill { display:inline-block; padding:4px 9px; border-radius:6px; font-weight:500; }
+    #member-intake-concept .mi-warning { color:var(--mi-warn); background:var(--mi-warn-bg); }
+    #member-intake-concept .mi-good { color:var(--mi-good); background:var(--mi-good-bg); }
+    #member-intake-concept .mi-neutral { color:var(--mi-muted); background:var(--mi-bg); }
+    #member-intake-concept .mi-ready { color:var(--mi-accent); background:var(--mi-tint); }
+    #member-intake-concept .mi-steps { display:flex; gap:8px; flex-wrap:wrap; }
+    #member-intake-concept .mi-steps button[aria-current=&quot;step&quot;] { background:var(--mi-tint); color:var(--mi-accent); border-color:var(--mi-accent); }
+    #member-intake-concept .mi-layout { display:grid; grid-template-columns:215px minmax(0,1fr); border-top:1px solid var(--mi-border); }
+    #member-intake-concept aside { padding:var(--mi-space) 14px; border-right:1px solid var(--mi-border); }
+    #member-intake-concept .mi-list { display:grid; gap:10px; margin-top:16px; }
+    #member-intake-concept .mi-person { display:grid; gap:10px; text-align:left; width:100%; }
+    #member-intake-concept .mi-person[aria-pressed=&quot;true&quot;] { border-color:var(--mi-accent); background:var(--mi-tint); }
+    #member-intake-concept main { padding:var(--mi-space); min-width:0; }
+    #member-intake-concept .mi-detail-top { display:flex; gap:12px; justify-content:space-between; align-items:center; flex-wrap:wrap; margin-bottom:20px; }
+    #member-intake-concept .mi-columns { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
+    #member-intake-concept .mi-pane { background:var(--mi-panel); border:1px solid var(--mi-border); border-radius:10px; padding:var(--mi-space); min-width:0; }
+    #member-intake-concept .mi-pane h3 { margin-bottom:16px; }
+    #member-intake-concept dl { margin:0; display:grid; gap:16px; }
+    #member-intake-concept dt { color:var(--mi-muted); margin-bottom:4px; }
+    #member-intake-concept dd { margin:0; overflow-wrap:anywhere; }
+    #member-intake-concept .mi-match-row { display:grid; gap:6px; padding:12px 0; border-bottom:1px solid var(--mi-border); }
+    #member-intake-concept .mi-match-row:last-child { border:0; }
+    #member-intake-concept .mi-source { margin-top:18px; overflow-wrap:anywhere; color:var(--mi-muted); }
+    #member-intake-concept .mi-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; }
+    #member-intake-concept .mi-footer { border-top:1px solid var(--mi-border); }
+    #member-intake-concept input[type=&quot;email&quot;], #member-intake-concept input[type=&quot;text&quot;] { color:var(--mi-text); background:var(--mi-bg); border:1px solid var(--mi-border); padding:10px; border-radius:6px; width:100%; }
+    #member-intake-concept .mi-confirm { display:flex; gap:10px; align-items:flex-start; margin-top:20px; padding:14px; border-radius:8px; background:var(--mi-warn-bg); color:var(--mi-warn); }
+    #member-intake-concept .mi-confirm input { margin-top:4px; }
+    #member-intake-concept .mi-import { display:grid; gap:20px; padding:32px; }
+    #member-intake-concept .mi-modal { background:var(--mi-panel); margin:20px; padding:24px; border:2px solid var(--mi-accent); border-radius:12px; display:grid; gap:16px; }
+    #member-intake-concept .mi-modal ul { margin:0; padding-left:20px; }
+    #member-intake-concept .mi-overview { padding:var(--mi-space); display:grid; gap:18px; }
+    #member-intake-concept .mi-overview-top { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
+    #member-intake-concept .mi-overview-top &gt; div { display:grid; gap:8px; }
+    #member-intake-concept .mi-table { width:100%; border-collapse:collapse; background:var(--mi-panel); }
+    #member-intake-concept .mi-table th, #member-intake-concept .mi-table td { text-align:left; padding:16px; vertical-align:top; border-bottom:1px solid var(--mi-border); overflow-wrap:anywhere; }
+    #member-intake-concept .mi-table th { font-weight:500; color:var(--mi-muted); }
+    #member-intake-concept .mi-table td &gt; span { display:block; margin-top:5px; }
+    #member-intake-concept .mi-table details { margin-top:8px; }
+    #member-intake-concept .mi-table details dl { margin-top:12px; }
+    #member-intake-concept .mi-results-summary { display:flex; flex-wrap:wrap; gap:10px; }
+    #member-intake-concept #mi-notice { padding:0 24px 16px; color:var(--mi-muted); overflow-wrap:anywhere; }
+    @media(max-width:760px) { #member-intake-concept .mi-layout { grid-template-columns:1fr; } #member-intake-concept aside { border-right:0; border-bottom:1px solid var(--mi-border); } #member-intake-concept .mi-list { grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); } }
+    @media(max-width:540px) { #member-intake-concept .mi-columns { grid-template-columns:1fr; } #member-intake-concept .mi-header, #member-intake-concept .mi-bar, #member-intake-concept .mi-footer { padding:16px; } #member-intake-concept main { padding:14px; } }
+    @media(max-width:650px) { #member-intake-concept .mi-table thead { display:none; } #member-intake-concept .mi-table tr { display:grid; grid-template-columns:1fr; border-bottom:1px solid var(--mi-border); } #member-intake-concept .mi-table td { display:block; border:0; padding:10px 16px; } }
+  &lt;/style&gt;
+  &lt;header class=&quot;mi-header&quot;&gt;
+    &lt;div class=&quot;mi-brand&quot;&gt;&lt;i data-lucide=&quot;folder-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;div&gt;&lt;h2&gt;Member intake&lt;/h2&gt;&lt;span class=&quot;mi-subtle&quot;&gt;Paperwork to Action Builder&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+    &lt;div class=&quot;mi-context&quot;&gt;&lt;span&gt;Example local · Membership campaign&lt;/span&gt;&lt;span class=&quot;mi-subtle&quot;&gt;Design concept · Sample data&lt;/span&gt;&lt;/div&gt;
+  &lt;/header&gt;
+  &lt;nav class=&quot;mi-bar&quot; aria-label=&quot;Import workflow&quot;&gt;
+    &lt;div class=&quot;mi-steps&quot;&gt;
+      &lt;button type=&quot;button&quot; id=&quot;mi-import-tab&quot;&gt;1 · Import&lt;/button&gt;
+      &lt;button type=&quot;button&quot; id=&quot;mi-review-tab&quot; aria-current=&quot;step&quot;&gt;2 · Batch preview&lt;/button&gt;
+      &lt;button type=&quot;button&quot; id=&quot;mi-send-tab&quot; disabled&gt;3 · Results&lt;/button&gt;
+      &lt;button type=&quot;button&quot; id=&quot;mi-held-tab&quot; hidden&gt;Needs review&lt;/button&gt;
+    &lt;/div&gt;
+    &lt;span class=&quot;mi-subtle&quot; id=&quot;mi-total&quot;&gt;3 people imported&lt;/span&gt;
+  &lt;/nav&gt;
+  &lt;section id=&quot;mi-import-panel&quot; class=&quot;mi-import&quot; hidden&gt;
+    &lt;h2&gt;Find downloaded paperwork&lt;/h2&gt;
+    &lt;dl&gt;&lt;div&gt;&lt;dt&gt;Folder&lt;/dt&gt;&lt;dd&gt;Downloads&lt;/dd&gt;&lt;/div&gt;&lt;div&gt;&lt;dt&gt;Filename ending&lt;/dt&gt;&lt;dd&gt;ORGANIZED.pdf&lt;/dd&gt;&lt;/div&gt;&lt;/dl&gt;
+    &lt;div&gt;&lt;button type=&quot;button&quot; class=&quot;mi-primary&quot; id=&quot;mi-scan&quot;&gt;Find paperwork&lt;/button&gt;&lt;/div&gt;
+  &lt;/section&gt;
+  &lt;section class=&quot;mi-overview&quot; id=&quot;mi-preview-panel&quot;&gt;
+    &lt;div class=&quot;mi-overview-top&quot;&gt;&lt;div&gt;&lt;h2 id=&quot;mi-preview-title&quot;&gt;Paperwork is ready to process&lt;/h2&gt;&lt;p class=&quot;mi-subtle&quot;&gt;One batch action checks Action Builder and submits everyone who passes.&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;
+    &lt;table class=&quot;mi-table&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Person and paperwork&lt;/th&gt;&lt;th&gt;Contact information&lt;/th&gt;&lt;th&gt;Status&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody id=&quot;mi-preview-rows&quot;&gt;&lt;/tbody&gt;&lt;/table&gt;
+    &lt;p id=&quot;mi-preview-empty&quot; class=&quot;mi-subtle&quot; hidden&gt;No records are waiting to be submitted. Completed submissions are in Results.&lt;/p&gt;
+    &lt;p class=&quot;mi-subtle&quot;&gt;Flagged records stay held. Individual approval is only needed for those records.&lt;/p&gt;
+  &lt;/section&gt;
+  &lt;section class=&quot;mi-overview&quot; id=&quot;mi-results-panel&quot; hidden&gt;
+    &lt;div class=&quot;mi-overview-top&quot;&gt;&lt;div&gt;&lt;h2&gt;Batch results&lt;/h2&gt;&lt;p class=&quot;mi-subtle&quot;&gt;Submitted people are complete. Opening their details is optional.&lt;/p&gt;&lt;/div&gt;&lt;button type=&quot;button&quot; id=&quot;mi-review-held&quot;&gt;Review flagged people&lt;/button&gt;&lt;/div&gt;
+    &lt;div class=&quot;mi-results-summary&quot; id=&quot;mi-results-counts&quot; role=&quot;status&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;
+    &lt;table class=&quot;mi-table&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Person&lt;/th&gt;&lt;th&gt;Result&lt;/th&gt;&lt;th&gt;Details&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody id=&quot;mi-result-rows&quot;&gt;&lt;/tbody&gt;&lt;/table&gt;
+  &lt;/section&gt;
+  &lt;div class=&quot;mi-layout&quot; id=&quot;mi-review-panel&quot; hidden&gt;
+    &lt;aside aria-label=&quot;Imported people&quot;&gt;
+      &lt;strong id=&quot;mi-sidebar-label&quot;&gt;Needs your review&lt;/strong&gt;
+      &lt;div class=&quot;mi-list&quot; id=&quot;mi-people&quot;&gt;&lt;/div&gt;
+    &lt;/aside&gt;
+    &lt;main&gt;
+      &lt;div class=&quot;mi-detail-top&quot;&gt;&lt;h2 id=&quot;mi-name&quot;&gt;Morgan Example&lt;/h2&gt;&lt;span id=&quot;mi-status&quot; class=&quot;mi-pill mi-warning&quot;&gt;Needs review&lt;/span&gt;&lt;/div&gt;
+      &lt;div class=&quot;mi-columns&quot;&gt;
+        &lt;section class=&quot;mi-pane&quot; aria-label=&quot;Local contact information&quot;&gt;
+          &lt;h3&gt;From the paperwork&lt;/h3&gt;
+          &lt;dl&gt;
+            &lt;div&gt;&lt;dt&gt;Email&lt;/dt&gt;&lt;dd id=&quot;mi-email&quot;&gt;morgan@example.test&lt;/dd&gt;&lt;dd id=&quot;mi-email-editor&quot; hidden&gt;&lt;label for=&quot;mi-email-input&quot;&gt;Corrected email&lt;/label&gt;&lt;input type=&quot;email&quot; id=&quot;mi-email-input&quot; value=&quot;morgan@example.test&quot;&gt;&lt;/dd&gt;&lt;/div&gt;
+            &lt;div&gt;&lt;dt&gt;Phone&lt;/dt&gt;&lt;dd id=&quot;mi-phone&quot;&gt;(202) 555-0123&lt;/dd&gt;&lt;/div&gt;
+            &lt;div&gt;&lt;dt&gt;Address&lt;/dt&gt;&lt;dd id=&quot;mi-address&quot;&gt;123 Example Street&lt;br&gt;Washington, DC 20001&lt;/dd&gt;&lt;/div&gt;
+          &lt;/dl&gt;
+          &lt;div class=&quot;mi-actions&quot;&gt;&lt;button type=&quot;button&quot; id=&quot;mi-edit&quot;&gt;Edit these details&lt;/button&gt;&lt;/div&gt;
+        &lt;/section&gt;
+        &lt;section class=&quot;mi-pane&quot; aria-label=&quot;Action Builder lookup result&quot;&gt;
+          &lt;h3&gt;Action Builder check&lt;/h3&gt;
+          &lt;div id=&quot;mi-match&quot;&gt;
+            &lt;span class=&quot;mi-pill mi-warning&quot;&gt;Possible existing person&lt;/span&gt;
+            &lt;div class=&quot;mi-match-row&quot;&gt;&lt;strong&gt;Email matches&lt;/strong&gt;&lt;span class=&quot;mi-subtle&quot;&gt;This address found an existing record.&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;mi-match-row&quot;&gt;&lt;strong&gt;Phone differs or is missing&lt;/strong&gt;&lt;span class=&quot;mi-subtle&quot;&gt;Check the existing person&#x27;s details.&lt;/span&gt;&lt;/div&gt;
+            &lt;details class=&quot;mi-match-row&quot;&gt;&lt;summary&gt;Existing record ID&lt;/summary&gt;&lt;span style=&quot;overflow-wrap:anywhere&quot;&gt;action_builder:11111111-1111-4111-8111-111111111111&lt;/span&gt;&lt;/details&gt;
+          &lt;/div&gt;
+          &lt;div id=&quot;mi-clear&quot; hidden&gt;&lt;span class=&quot;mi-pill mi-good&quot;&gt;No email or phone matches&lt;/span&gt;&lt;div class=&quot;mi-match-row&quot;&gt;Checks run again before sending.&lt;/div&gt;&lt;/div&gt;
+          &lt;div id=&quot;mi-recheck&quot; hidden&gt;&lt;span class=&quot;mi-pill mi-warning&quot;&gt;Details changed&lt;/span&gt;&lt;div class=&quot;mi-match-row&quot;&gt;Run the checks again before sending.&lt;/div&gt;&lt;/div&gt;
+          &lt;div id=&quot;mi-sent&quot; hidden&gt;&lt;span class=&quot;mi-pill mi-good&quot;&gt;Submission confirmed&lt;/span&gt;&lt;div class=&quot;mi-match-row&quot;&gt;No further review is required.&lt;/div&gt;&lt;div class=&quot;mi-match-row&quot;&gt;&lt;strong&gt;Action Builder person ID&lt;/strong&gt;&lt;span id=&quot;mi-receipt-id&quot; style=&quot;overflow-wrap:anywhere&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;/section&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mi-source&quot; id=&quot;mi-source&quot;&gt;Source: Morgan-Example-ORGANIZED.pdf&lt;/div&gt;
+      &lt;label class=&quot;mi-confirm&quot; id=&quot;mi-override&quot;&gt;&lt;input id=&quot;mi-checked&quot; type=&quot;checkbox&quot;&gt;&lt;span&gt;I checked the existing record and confirmed this is a different person.&lt;/span&gt;&lt;/label&gt;
+      &lt;div class=&quot;mi-actions&quot; id=&quot;mi-review-actions&quot;&gt;
+        &lt;button type=&quot;button&quot; id=&quot;mi-keep&quot;&gt;Keep for later&lt;/button&gt;
+        &lt;button type=&quot;button&quot; id=&quot;mi-discard&quot;&gt;Discard this import&lt;/button&gt;
+        &lt;button type=&quot;button&quot; class=&quot;mi-primary&quot; id=&quot;mi-new-person&quot; disabled&gt;Review sending as a new person&lt;/button&gt;
+        &lt;button type=&quot;button&quot; id=&quot;mi-recheck-button&quot; hidden&gt;Check revised details&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/main&gt;
+  &lt;/div&gt;
+  &lt;section class=&quot;mi-modal&quot; id=&quot;mi-confirm-panel&quot; role=&quot;region&quot; aria-label=&quot;Confirm sample action&quot; hidden&gt;
+    &lt;h2 id=&quot;mi-confirm-title&quot;&gt;Review this submission&lt;/h2&gt;
+    &lt;p id=&quot;mi-confirm-destination&quot;&gt;Destination: Example local · Membership campaign&lt;/p&gt;
+    &lt;ul id=&quot;mi-confirm-names&quot;&gt;&lt;/ul&gt;
+    &lt;label id=&quot;mi-reason-label&quot; hidden&gt;Reason for creating a separate person&lt;input type=&quot;text&quot; id=&quot;mi-reason&quot; style=&quot;display:block;width:100%;padding:10px;margin-top:8px&quot;&gt;&lt;/label&gt;
+    &lt;span class=&quot;mi-subtle&quot; id=&quot;mi-confirm-note&quot;&gt;Design preview only. No Action Builder request will be made.&lt;/span&gt;
+    &lt;div class=&quot;mi-actions&quot;&gt;&lt;button type=&quot;button&quot; id=&quot;mi-cancel&quot;&gt;Back to review&lt;/button&gt;&lt;button type=&quot;button&quot; class=&quot;mi-primary&quot; id=&quot;mi-confirm-button&quot;&gt;Confirm sample submission&lt;/button&gt;&lt;/div&gt;
+  &lt;/section&gt;
+  &lt;footer class=&quot;mi-footer&quot;&gt;&lt;span id=&quot;mi-footer-status&quot;&gt;Destination: Example local · Membership campaign&lt;/span&gt;&lt;button type=&quot;button&quot; class=&quot;mi-primary&quot; id=&quot;mi-batch-send&quot;&gt;Check and submit batch&lt;/button&gt;&lt;/footer&gt;
+  &lt;div id=&quot;mi-notice&quot; role=&quot;status&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;
+  &lt;script&gt;
+    (() =&gt; {
+      const root = document.getElementById(&#x27;member-intake-concept&#x27;);
+      const el = (id) =&gt; root.querySelector(&#x27;#&#x27; + id);
+      const people = [
+        {name:&#x27;Morgan Example&#x27;, email:&#x27;morgan@example.test&#x27;, phone:&#x27;(202) 555-0123&#x27;, status:&#x27;pending&#x27;, lookup:&#x27;match&#x27;, receipt:&#x27;action_builder:22222222-2222-4222-8222-222222222222&#x27;},
+        {name:&#x27;Taylor Example&#x27;, email:&#x27;taylor@example.test&#x27;, phone:&#x27;(202) 555-0145&#x27;, status:&#x27;pending&#x27;, lookup:&#x27;clear&#x27;, receipt:&#x27;action_builder:33333333-3333-4333-8333-333333333333&#x27;},
+        {name:&#x27;Casey Example&#x27;, email:&#x27;casey@example.test&#x27;, phone:&#x27;(202) 555-0187&#x27;, status:&#x27;pending&#x27;, lookup:&#x27;clear&#x27;, receipt:&#x27;action_builder:44444444-4444-4444-8444-444444444444&#x27;}
+      ];
+      let selected = 0, editing = false, action = &#x27;&#x27;, view = &#x27;preview&#x27;, batchRun = false;
+      const appearance = {accent:&#x27;Blue&#x27;, spacing:&#x27;Comfortable&#x27;};
+      const isHeld = p =&gt; p.status === &#x27;review&#x27; || p.status === &#x27;changed&#x27;;
+      const labels = {pending:&#x27;Ready to be submitted&#x27;, review:&#x27;Needs review&#x27;, changed:&#x27;Check again&#x27;, sent:&#x27;Submitted&#x27;, discarded:&#x27;Discarded&#x27;};
+      function badge(text, kind) { const node=document.createElement(&#x27;span&#x27;); node.className=&#x27;mi-pill mi-&#x27;+kind; node.textContent=text; return node; }
+      function notice(message) { el(&#x27;mi-notice&#x27;).textContent = message; }
+      function showHeld(index) {
+        const next = typeof index === &#x27;number&#x27; ? index : people.findIndex(isHeld);
+        if(next === -1) { notice(&#x27;No sample records need review.&#x27;); return; }
+        selected=next; editing=false; action=&#x27;&#x27;; el(&#x27;mi-confirm-panel&#x27;).hidden=true; el(&#x27;mi-checked&#x27;).checked=false; view=&#x27;review&#x27;; notice(&#x27;&#x27;); render();
+      }
+      function renderLists() {
+        el(&#x27;mi-preview-rows&#x27;).replaceChildren();
+        el(&#x27;mi-result-rows&#x27;).replaceChildren();
+        people.forEach((person,index) =&gt; {
+          if(person.status !== &#x27;discarded&#x27; &amp;&amp; person.status !== &#x27;sent&#x27;) {
+            const row=document.createElement(&#x27;tr&#x27;);
+            const name=document.createElement(&#x27;td&#x27;);
+            const strong=document.createElement(&#x27;strong&#x27;); strong.textContent=person.name;
+            const source=document.createElement(&#x27;span&#x27;); source.className=&#x27;mi-subtle&#x27;; source.textContent=person.name.replaceAll(&#x27; &#x27;,&#x27;-&#x27;)+&#x27;-ORGANIZED.pdf&#x27;; name.append(strong,source);
+            const contact=document.createElement(&#x27;td&#x27;);
+            const email=document.createElement(&#x27;span&#x27;); email.textContent=person.email;
+            const phone=document.createElement(&#x27;span&#x27;); phone.textContent=person.phone;
+            const details=document.createElement(&#x27;details&#x27;); const summary=document.createElement(&#x27;summary&#x27;); summary.textContent=&#x27;More contact details&#x27;;
+            const address=document.createElement(&#x27;div&#x27;); address.textContent=&#x27;123 Example Street, Washington, DC 20001 · Middle initial: A&#x27;; details.append(summary,address); contact.append(email,phone,details);
+            const state=document.createElement(&#x27;td&#x27;); state.append(badge(labels[person.status],isHeld(person)?&#x27;warning&#x27;:&#x27;ready&#x27;));
+            row.append(name,contact,state); el(&#x27;mi-preview-rows&#x27;).append(row);
+          }
+        });
+        el(&#x27;mi-preview-empty&#x27;).hidden = el(&#x27;mi-preview-rows&#x27;).children.length &gt; 0;
+        el(&#x27;mi-preview-title&#x27;).textContent = people.some(p=&gt;p.status===&#x27;pending&#x27;) ? &#x27;Paperwork is ready to process&#x27; : &#x27;No new candidates to submit&#x27;;
+        people.map((person,index)=&gt;({person,index})).sort((a,b)=&gt;(a.person.status===&#x27;sent&#x27;?0:1)-(b.person.status===&#x27;sent&#x27;?0:1)).forEach(({person,index})=&gt;{
+          const row=document.createElement(&#x27;tr&#x27;);
+          const name=document.createElement(&#x27;td&#x27;); name.textContent=person.name;
+          const result=document.createElement(&#x27;td&#x27;); result.append(badge(labels[person.status],isHeld(person)?&#x27;warning&#x27;:person.status===&#x27;sent&#x27;?&#x27;good&#x27;:&#x27;neutral&#x27;));
+          const context=document.createElement(&#x27;span&#x27;); context.className=&#x27;mi-subtle&#x27;; context.textContent=person.status===&#x27;sent&#x27;?&#x27;Confirmed in this sample batch&#x27;:isHeld(person)?&#x27;Possible existing person — not submitted&#x27;:person.status===&#x27;discarded&#x27;?&#x27;Removed from this import&#x27;:&#x27;Check has not run&#x27;; result.append(context);
+          const details=document.createElement(&#x27;td&#x27;);
+          if(person.status===&#x27;sent&#x27;||isHeld(person)) {
+            const button=document.createElement(&#x27;button&#x27;); button.type=&#x27;button&#x27;; button.textContent=person.status===&#x27;sent&#x27;?&#x27;View receipt&#x27;:&#x27;Review person&#x27;;
+            button.onclick=()=&gt;{ if(isHeld(person)) showHeld(index); else { selected=index; editing=false; view=&#x27;detail&#x27;; notice(&#x27;Viewing a completed sample submission. No approval is needed.&#x27;); render(); } }; details.append(button);
+          }
+          row.append(name,result,details); el(&#x27;mi-result-rows&#x27;).append(row);
+        });
+        const sent=people.filter(p=&gt;p.status===&#x27;sent&#x27;).length;
+        const held=people.filter(isHeld).length;
+        el(&#x27;mi-results-counts&#x27;).replaceChildren(badge(sent+&#x27; submitted&#x27;,&#x27;good&#x27;),badge(held+&#x27; need review&#x27;,held?&#x27;warning&#x27;:&#x27;neutral&#x27;));
+        el(&#x27;mi-review-held&#x27;).textContent=&#x27;Review &#x27;+held+&#x27; flagged &#x27;+(held===1?&#x27;person&#x27;:&#x27;people&#x27;);
+        el(&#x27;mi-review-held&#x27;).hidden=held===0;
+      }
+      function openAction(next) {
+        action = next;
+        const discard = next === &#x27;discard&#x27;;
+        el(&#x27;mi-confirm-panel&#x27;).hidden = false;
+        el(&#x27;mi-review-panel&#x27;).hidden = true;
+        el(&#x27;mi-import-panel&#x27;).hidden = true;
+        el(&#x27;mi-confirm-title&#x27;).textContent = discard ? &#x27;Discard this import?&#x27; : &#x27;Review this submission&#x27;;
+        el(&#x27;mi-confirm-destination&#x27;).hidden = discard;
+        el(&#x27;mi-confirm-names&#x27;).replaceChildren();
+        const names = [people[selected]];
+        names.forEach(p =&gt; { const li=document.createElement(&#x27;li&#x27;); li.textContent=p.name; el(&#x27;mi-confirm-names&#x27;).append(li); });
+        el(&#x27;mi-reason-label&#x27;).hidden = next !== &#x27;single&#x27;;
+        el(&#x27;mi-reason&#x27;).value = &#x27;&#x27;;
+        el(&#x27;mi-confirm-button&#x27;).disabled = next === &#x27;single&#x27;;
+        el(&#x27;mi-confirm-button&#x27;).textContent = discard ? &#x27;Discard sample import&#x27; : &#x27;Confirm sample submission&#x27;;
+        el(&#x27;mi-confirm-note&#x27;).textContent = discard ? &#x27;Remove this import from the list. The source PDF and existing Action Builder person stay unchanged.&#x27; : &#x27;Design preview only. No Action Builder request will be made.&#x27;;
+        notice(&#x27;&#x27;);
+      }
+      function render() {
+        root.style.setProperty(&#x27;--mi-space&#x27;, appearance.spacing === &#x27;Compact&#x27; ? &#x27;14px&#x27; : &#x27;20px&#x27;);
+        root.style.setProperty(&#x27;--mi-accent&#x27;, appearance.accent === &#x27;Teal&#x27; ? &#x27;light-dark(#126c69,#90d7cc)&#x27; : &#x27;light-dark(#2454cf,#98b7ff)&#x27;);
+        root.style.setProperty(&#x27;--mi-tint&#x27;, appearance.accent === &#x27;Teal&#x27; ? &#x27;light-dark(#eaf6f3,#253f40)&#x27; : &#x27;light-dark(#edf2ff,#293e64)&#x27;);
+        const pending = people.filter(p =&gt; p.status === &#x27;pending&#x27;).length;
+        const held = people.filter(isHeld).length;
+        el(&#x27;mi-total&#x27;).textContent = people.filter(p =&gt; p.status !== &#x27;discarded&#x27;).length + &#x27; people imported&#x27;;
+        el(&#x27;mi-footer-status&#x27;).textContent = &#x27;Destination: Example local · Membership campaign&#x27;;
+        el(&#x27;mi-batch-send&#x27;).textContent = &#x27;Check and submit batch&#x27;;
+        el(&#x27;mi-batch-send&#x27;).disabled = pending === 0 || !!action;
+        el(&#x27;mi-batch-send&#x27;).hidden = view !== &#x27;preview&#x27; || !!action;
+        el(&#x27;mi-held-tab&#x27;).hidden = held === 0;
+        el(&#x27;mi-held-tab&#x27;).textContent = &#x27;Needs review (&#x27;+held+&#x27;)&#x27;;
+        el(&#x27;mi-send-tab&#x27;).disabled = !batchRun;
+        el(&#x27;mi-sidebar-label&#x27;).textContent = view===&#x27;detail&#x27;?&#x27;Completed submissions&#x27;:&#x27;Needs your review&#x27;;
+        renderLists();
+        el(&#x27;mi-people&#x27;).replaceChildren();
+        people.forEach((p,i) =&gt; {
+          if (view===&#x27;detail&#x27; ? p.status!==&#x27;sent&#x27; : !isHeld(p)) return;
+          const button = document.createElement(&#x27;button&#x27;); button.type=&#x27;button&#x27;; button.className=&#x27;mi-person&#x27;; button.setAttribute(&#x27;aria-pressed&#x27;, String(i===selected));
+          const name = document.createElement(&#x27;strong&#x27;); name.textContent=p.name;
+          const status = document.createElement(&#x27;span&#x27;); status.className=&#x27;mi-pill &#x27; + (p.status===&#x27;review&#x27;||p.status===&#x27;changed&#x27; ? &#x27;mi-warning&#x27;:&#x27;mi-good&#x27;); status.textContent=labels[p.status];
+          button.append(name,status); button.addEventListener(&#x27;click&#x27;,()=&gt;{ selected=i; editing=false; el(&#x27;mi-checked&#x27;).checked=false; notice(&#x27;&#x27;); render(); }); el(&#x27;mi-people&#x27;).append(button);
+        });
+        const person = people[selected];
+        el(&#x27;mi-name&#x27;).textContent=person.name; el(&#x27;mi-email&#x27;).textContent=person.email; el(&#x27;mi-phone&#x27;).textContent=person.phone;
+        el(&#x27;mi-email-input&#x27;).value=person.email;
+        el(&#x27;mi-status&#x27;).textContent=labels[person.status]; el(&#x27;mi-status&#x27;).className=&#x27;mi-pill &#x27; + (person.status===&#x27;review&#x27;||person.status===&#x27;changed&#x27; ? &#x27;mi-warning&#x27;:&#x27;mi-good&#x27;);
+        el(&#x27;mi-receipt-id&#x27;).textContent=person.receipt;
+        el(&#x27;mi-source&#x27;).textContent=&#x27;Source: &#x27;+person.name.replaceAll(&#x27; &#x27;,&#x27;-&#x27;)+&#x27;-ORGANIZED.pdf&#x27;;
+        el(&#x27;mi-email&#x27;).hidden=editing; el(&#x27;mi-email-editor&#x27;).hidden=!editing; el(&#x27;mi-edit&#x27;).textContent=editing?&#x27;Save corrected email&#x27;:&#x27;Edit these details&#x27;;
+        el(&#x27;mi-edit&#x27;).disabled=person.status===&#x27;sent&#x27;||person.status===&#x27;discarded&#x27;;
+        el(&#x27;mi-match&#x27;).hidden=person.status!==&#x27;review&#x27;; el(&#x27;mi-clear&#x27;).hidden=true; el(&#x27;mi-recheck&#x27;).hidden=person.status!==&#x27;changed&#x27;; el(&#x27;mi-sent&#x27;).hidden=person.status!==&#x27;sent&#x27;;
+        el(&#x27;mi-override&#x27;).hidden=person.status!==&#x27;review&#x27;; el(&#x27;mi-new-person&#x27;).hidden=person.status!==&#x27;review&#x27;; el(&#x27;mi-new-person&#x27;).disabled=!el(&#x27;mi-checked&#x27;).checked||editing;
+        el(&#x27;mi-review-actions&#x27;).hidden=person.status===&#x27;sent&#x27;||person.status===&#x27;discarded&#x27;;
+        el(&#x27;mi-recheck-button&#x27;).hidden=person.status!==&#x27;changed&#x27;;
+        el(&#x27;mi-review-panel&#x27;).hidden=(view!==&#x27;review&#x27;&amp;&amp;view!==&#x27;detail&#x27;)||!!action; el(&#x27;mi-import-panel&#x27;).hidden=view!==&#x27;import&#x27;||!!action;
+        el(&#x27;mi-preview-panel&#x27;).hidden=view!==&#x27;preview&#x27;||!!action; el(&#x27;mi-results-panel&#x27;).hidden=view!==&#x27;results&#x27;||!!action;
+        el(&#x27;mi-import-tab&#x27;).setAttribute(&#x27;aria-current&#x27;,view===&#x27;import&#x27;?&#x27;step&#x27;:&#x27;false&#x27;); el(&#x27;mi-review-tab&#x27;).setAttribute(&#x27;aria-current&#x27;,view===&#x27;preview&#x27;&amp;&amp;!action?&#x27;step&#x27;:&#x27;false&#x27;); el(&#x27;mi-send-tab&#x27;).setAttribute(&#x27;aria-current&#x27;,view===&#x27;results&#x27;||view===&#x27;detail&#x27;?&#x27;step&#x27;:&#x27;false&#x27;); el(&#x27;mi-held-tab&#x27;).setAttribute(&#x27;aria-current&#x27;,view===&#x27;review&#x27;?&#x27;step&#x27;:&#x27;false&#x27;);
+      }
+      el(&#x27;mi-import-tab&#x27;).onclick=()=&gt;{ action=&#x27;&#x27;; el(&#x27;mi-confirm-panel&#x27;).hidden=true; view=&#x27;import&#x27;; render(); };
+      el(&#x27;mi-review-tab&#x27;).onclick=()=&gt;{ action=&#x27;&#x27;; el(&#x27;mi-confirm-panel&#x27;).hidden=true; view=&#x27;preview&#x27;; render(); };
+      el(&#x27;mi-send-tab&#x27;).onclick=()=&gt;{ action=&#x27;&#x27;; el(&#x27;mi-confirm-panel&#x27;).hidden=true; view=&#x27;results&#x27;; render(); };
+      el(&#x27;mi-held-tab&#x27;).onclick=()=&gt;showHeld(); el(&#x27;mi-review-held&#x27;).onclick=()=&gt;showHeld();
+      el(&#x27;mi-scan&#x27;).onclick=()=&gt;{ view=&#x27;preview&#x27;; notice(&#x27;Sample scan complete. Related paperwork is grouped; no real files were read.&#x27;); render(); };
+      el(&#x27;mi-batch-send&#x27;).onclick=()=&gt;{
+        people.filter(p=&gt;p.status===&#x27;pending&#x27;).forEach(p=&gt;{p.status=p.lookup===&#x27;match&#x27;?&#x27;review&#x27;:&#x27;sent&#x27;;});
+        batchRun=true; view=&#x27;results&#x27;; notice(&#x27;Sample batch complete. This concept made no API requests.&#x27;); render();
+      };
+      el(&#x27;mi-checked&#x27;).onchange=()=&gt;{ el(&#x27;mi-new-person&#x27;).disabled=!el(&#x27;mi-checked&#x27;).checked||editing; };
+      el(&#x27;mi-new-person&#x27;).onclick=()=&gt;{ openAction(&#x27;single&#x27;); render(); };
+      el(&#x27;mi-discard&#x27;).onclick=()=&gt;{ openAction(&#x27;discard&#x27;); render(); };
+      el(&#x27;mi-keep&#x27;).onclick=()=&gt;{ view=&#x27;results&#x27;; notice(&#x27;Kept for later review. Completed submissions remain complete.&#x27;); render(); };
+      el(&#x27;mi-edit&#x27;).onclick=()=&gt;{
+        if(editing) {
+          const input=el(&#x27;mi-email-input&#x27;); if(!input.value.trim()||!input.checkValidity()) { input.reportValidity(); notice(&#x27;Enter a valid sample email.&#x27;); return; }
+          if(people[selected].email!==input.value.trim()) { people[selected].email=input.value.trim(); people[selected].status=&#x27;changed&#x27;; el(&#x27;mi-checked&#x27;).checked=false; notice(&#x27;Sample correction saved. Previous checks no longer apply.&#x27;); }
+        }
+        editing=!editing; render();
+      };
+      el(&#x27;mi-recheck-button&#x27;).onclick=()=&gt;{ people[selected].status=&#x27;review&#x27;; notice(&#x27;Sample check complete. A possible existing person still needs review.&#x27;); render(); };
+      el(&#x27;mi-reason&#x27;).oninput=()=&gt;{ el(&#x27;mi-confirm-button&#x27;).disabled=!el(&#x27;mi-reason&#x27;).value.trim(); };
+      el(&#x27;mi-cancel&#x27;).onclick=()=&gt;{ action=&#x27;&#x27;; el(&#x27;mi-confirm-panel&#x27;).hidden=true; view=&#x27;review&#x27;; render(); };
+      el(&#x27;mi-confirm-button&#x27;).onclick=()=&gt;{
+        if(action===&#x27;single&#x27;&amp;&amp;!el(&#x27;mi-reason&#x27;).value.trim()) return;
+        if(action===&#x27;single&#x27;) people[selected].status=&#x27;sent&#x27;;
+        if(action===&#x27;discard&#x27;) { people[selected].status=&#x27;discarded&#x27;; const next=people.findIndex(p=&gt;p.status!==&#x27;discarded&#x27;); if(next!==-1) selected=next; }
+        notice(action===&#x27;discard&#x27;?&#x27;Sample import discarded. Original documents stay unchanged.&#x27;:&#x27;Demo complete. No people were sent to Action Builder.&#x27;);
+        action=&#x27;&#x27;; el(&#x27;mi-confirm-panel&#x27;).hidden=true; view=&#x27;results&#x27;; render();
+      };
+      render();
+      if(globalThis.Tweak) { const tweak=new Tweak({container:root,onChange:render}); tweak.addSelect(appearance,&#x27;accent&#x27;,{label:&#x27;Accent color&#x27;,options:[&#x27;Blue&#x27;,&#x27;Teal&#x27;]}); tweak.addSelect(appearance,&#x27;spacing&#x27;,{label:&#x27;Spacing&#x27;,options:[&#x27;Comfortable&#x27;,&#x27;Compact&#x27;]}); }
+    })();
+  &lt;/script&gt;
+&lt;/div&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+  let lastPointerWasTouch = false;
+  let pinnedByTouch = false;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    pinnedByTouch = false;
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handlePointer = (event) =&gt; {
+    lastPointerWasTouch =
+      event.type === &quot;pointerdown&quot; &amp;&amp; event.pointerType === &quot;touch&quot;;
+  };
+  const handleTouchClick = (event) =&gt; {
+    const isTouch = event.pointerType === &quot;touch&quot; || lastPointerWasTouch;
+    lastPointerWasTouch = false;
+    if (!isTouch || event.detail === 0) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (
+      trigger == null ||
+      !trigger.isConnected ||
+      getContent(trigger).length === 0 ||
+      (pinnedByTouch &amp;&amp; activeTrigger === trigger)
+    ) {
+      if (pinnedByTouch) {
+        closeTooltip();
+      }
+      return;
+    }
+    openTooltip(trigger);
+    pinnedByTouch = activeTrigger === trigger;
+    window.setTimeout(() =&gt; {
+      if (activeTrigger === trigger &amp;&amp; !trigger.isConnected) {
+        closeTooltip(false);
+      }
+    }, 0);
+  };
+  const handleLeave = (event) =&gt; {
+    if (pinnedByTouch) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    lastPointerWasTouch = false;
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    lastPointerWasTouch = false;
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerdown&quot;, handlePointer);
+    document.removeEventListener(&quot;pointercancel&quot;, handlePointer);
+    document.removeEventListener(&quot;click&quot;, handleTouchClick);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerdown&quot;, handlePointer);
+  document.addEventListener(&quot;pointercancel&quot;, handlePointer);
+  document.addEventListener(&quot;click&quot;, handleTouchClick);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-tabs&quot;&gt;
+(() =&gt; {
+  const selector = &#x27;.nav[role=&quot;tablist&quot;] [role=&quot;tab&quot;]&#x27;;
+  const disabled = &#x27;:disabled,[aria-disabled=&quot;true&quot;]&#x27;;
+  const selectTab = (selected) =&gt; {
+    const panelId = selected.getAttribute(&quot;aria-controls&quot;);
+    for (const tab of selected.closest(&#x27;[role=&quot;tablist&quot;]&#x27;).querySelectorAll(&#x27;[role=&quot;tab&quot;]&#x27;)) {
+      const active = tab === selected;
+      tab.classList.toggle(&quot;active&quot;, active);
+      tab.setAttribute(&quot;aria-selected&quot;, String(active));
+      const id = tab.getAttribute(&quot;aria-controls&quot;);
+      const panel = id &amp;&amp; document.getElementById(id);
+      if (panel != null) {
+        panel.hidden = id !== panelId;
+        if (!panel.hidden &amp;&amp; selected.id) {
+          panel.setAttribute(&quot;aria-labelledby&quot;, selected.id);
+        }
+      }
+    }
+  };
+  const interact = (event) =&gt; {
+    const tab = event.target?.closest?.(selector);
+    if (event.defaultPrevented || tab == null || tab.matches(disabled)) {
+      return;
+    }
+    if (event.type === &quot;click&quot;) {
+      selectTab(tab);
+      return;
+    }
+    const tabs = Array.from(
+      tab.closest(&#x27;[role=&quot;tablist&quot;]&#x27;).querySelectorAll(&#x27;[role=&quot;tab&quot;]&#x27;),
+    ).filter((candidate) =&gt; !candidate.matches(disabled));
+    const current = tabs.indexOf(tab);
+    let next;
+    if (event.key === &quot;ArrowRight&quot; || event.key === &quot;ArrowDown&quot;) {
+      next = (current + 1) % tabs.length;
+    } else if (event.key === &quot;ArrowLeft&quot; || event.key === &quot;ArrowUp&quot;) {
+      next = (current + tabs.length - 1) % tabs.length;
+    } else if (event.key === &quot;Home&quot;) {
+      next = 0;
+    } else if (event.key === &quot;End&quot;) {
+      next = tabs.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    tabs[next].focus();
+    selectTab(tabs[next]);
+  };
+
+  for (const list of document.querySelectorAll(&#x27;.nav[role=&quot;tablist&quot;]&#x27;)) {
+    const selected =
+      list.querySelector(&#x27;[role=&quot;tab&quot;][aria-selected=&quot;true&quot;]&#x27;) ??
+      list.querySelector(&#x27;[role=&quot;tab&quot;].active&#x27;) ??
+      list.querySelector(&#x27;[role=&quot;tab&quot;]&#x27;);
+    if (selected != null) {
+      selectTab(selected);
+    }
+  }
+  document.addEventListener(&quot;click&quot;, interact);
+  document.addEventListener(&quot;keydown&quot;, interact);
+  window.addEventListener(&quot;pagehide&quot;, () =&gt; {
+    document.removeEventListener(&quot;click&quot;, interact);
+    document.removeEventListener(&quot;keydown&quot;, interact);
+  }, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>
