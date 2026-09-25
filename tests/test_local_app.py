@@ -1,6 +1,7 @@
 """Exercise the local app using temporary workspaces and mocked Action Builder."""
 import io
 import json
+from copy import deepcopy
 import os
 from pathlib import Path
 import tempfile
@@ -16,6 +17,10 @@ from record_queue import RecordQueue
 from extract_person import ImportSummary
 from test_send_queue import RECORD, CLEAR, SUCCESS
 from test_lookup_queue import EXISTING, AMBIGUOUS
+from test_action_builder_lookup import collection, response
+
+
+REAL_LOOKUP_CHECK = local_app.ActionBuilderLookup.check
 
 
 class LocalAppTests(unittest.TestCase):
@@ -53,10 +58,13 @@ class LocalAppTests(unittest.TestCase):
     def review_data(self, item):
         return {'id': item.id, 'confirmed': True, 'checked': True, 'reason': 'Verified this is a separate person.'}
 
-    def uncertain_member(self):
+    def uncertain_member(self, *, address_line_1=None, family='sample'):
         self.app.settings.save({**self.data, 'residence_local': '1105'})
         self.config = self.app.settings.config()
-        item = self.seed(person={**RECORD, 'classification': 'CE/CW'})
+        person = {**RECORD, 'classification': 'CE/CW'}
+        if address_line_1 is not None:
+            person['address_line_1'] = address_line_1
+        item = self.seed(person=person, family=family)
         with RecordQueue(self.app.queue_dir) as queue:
             queue.record_lookup(item, CLEAR.as_history(self.config))
             queue.begin_send(item)
@@ -347,6 +355,51 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(row['status'], 'sent')
         self.assertEqual(row['lookup']['outcome'], 'existing')
         self.assertEqual(row['result']['identifiers'], EXISTING.candidates[0]['identifiers'])
+
+    def test_real_lookup_reconciles_suffix_difference_and_verifies_member_details(self):
+        item, data = self.uncertain_member(address_line_1='123 Sample Street')
+        record = self.app.state()['records'][0]['person']
+        remote = deepcopy(local_app.build_actionbuilder_payload(record)['person'])
+        remote['identifiers'] = list(EXISTING.candidates[0]['identifiers'])
+        remote['postal_addresses'][0]['address_lines'] = ['123 Sample St.']
+        documents = [response(collection([remote])), response(collection([remote])),
+                     *self.member_verification_responses()]
+        with (patch.object(local_app.ActionBuilderLookup, 'check', REAL_LOOKUP_CHECK),
+              patch.object(requests, 'get', side_effect=documents) as get):
+            self.app.perform('review-reconcile', data)
+        self.assertEqual(get.call_count, 4)
+        self.assertTrue(get.call_args_list[0].kwargs['params']['filter'].startswith('email_address eq '))
+        self.assertTrue(get.call_args_list[1].kwargs['params']['filter'].startswith('phone_number eq '))
+        self.assertTrue(get.call_args_list[-1].args[0].endswith('/taggings'))
+        self.post.assert_not_called()
+        reopened = local_app.Application(self.root, self.app.queue_dir)
+        row = reopened.state()['records'][0]
+        self.assertEqual(row['id'], item.id)
+        self.assertEqual(row['status'], 'sent')
+        self.assertEqual(row['lookup']['candidates'][0]['differing_fields'], [])
+        self.assertEqual(row['person']['address_line_1'], '123 Sample Street')
+
+    def test_real_lookup_reconciliation_keeps_different_house_or_unit_held(self):
+        cases = (('123 Sample Street', '124 Sample St.'),
+                 ('123 Sample Street Apt 2', '123 Sample St. Apt 3'))
+        for index, (local_street, remote_street) in enumerate(cases):
+            with self.subTest(local_street=local_street, remote_street=remote_street):
+                item, data = self.uncertain_member(address_line_1=local_street, family=f'address-case-{index}')
+                record = next(row['person'] for row in self.app.state()['records'] if row['id'] == item.id)
+                remote = deepcopy(local_app.build_actionbuilder_payload(record)['person'])
+                remote['identifiers'] = list(EXISTING.candidates[0]['identifiers'])
+                remote['postal_addresses'][0]['address_lines'] = [remote_street]
+                with (patch.object(local_app.ActionBuilderLookup, 'check', REAL_LOOKUP_CHECK),
+                      patch.object(requests, 'get', side_effect=[response(collection([remote])), response(collection([remote]))]) as get):
+                    with self.assertRaisesRegex(ValueError, 'exact matching person'):
+                        self.app.perform('review-reconcile', data)
+                self.assertEqual(get.call_count, 2)
+                row = next(row for row in self.app.state()['records'] if row['id'] == item.id)
+                self.assertEqual(row['status'], 'uncertain')
+                self.assertEqual(row['lookup']['outcome'], 'needs_review')
+                self.assertEqual(row['lookup']['candidates'][0]['differing_fields'], ['address_line_1'])
+                self.assertEqual(row['person']['address_line_1'], local_street)
+        self.post.assert_not_called()
 
     def test_reconcile_assessment_failure_preserves_latest_match_and_reason(self):
         _, data = self.uncertain_member()

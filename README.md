@@ -71,6 +71,8 @@ The Terminal window stays open while the app runs. Use **Close app** in the brow
 
 **Check earlier attempt** means creation may have succeeded while confirmation failed. A later lookup can find the person created by that attempt; it does not mean they existed before you submitted. Check the existing entry, including both member tags and assessment **1** when configured, then select **Mark already created** and confirm. This performs read-only checks and moves the record to Results only after verification succeeds. If it remains held, the record retains the latest failure reason and any completed contact check. Check the named field or API error before trying reconciliation again; do not submit the person again to clear the hold.
 
+Contact checks accept common numbered-street suffix equivalents such as **Street / St.** and **Road / Rd**, using a limited set of [USPS suffix abbreviations](https://pe.usps.com/text/pub28/28apc_002.htm). This changes comparison only; saved and submitted addresses retain their original text. House numbers, street names, directions, unit designators, and unit numbers must still match. Unsupported or ambiguous address formats remain subject to the existing strict comparison. These rules apply both to receipt recovery after sending and to **Mark already created**; both member tags and assessment must still pass verification when configured.
+
 The GUI uses the existing `composed_info` queue and history. The CLI still works, but do not run it against the same queue while a GUI operation is running. Folder or parsing issues appear in Import; a record that cannot be extracted may require correcting the PDF and importing again.
 
 ### Updating an installation

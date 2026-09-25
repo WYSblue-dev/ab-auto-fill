@@ -169,6 +169,79 @@ class LookupTests(unittest.TestCase):
                 self.assertEqual(result.outcome, "needs_review")
                 self.assertIn(changed_field, result.candidates[0]["differing_fields"])
 
+    def test_common_street_suffix_variants_match_without_changing_contact_data(self):
+        pairs = [('Street', 'St'), ('Road', 'Rd'), ('Avenue', 'Ave'),
+                 ('Boulevard', 'Blvd'), ('Drive', 'Dr'), ('Lane', 'Ln'),
+                 ('Court', 'Ct'), ('Circle', 'Cir'), ('Place', 'Pl'),
+                 ('Parkway', 'Pkwy'), ('Terrace', 'Ter'), ('Trail', 'Trl'),
+                 ('Highway', 'Hwy')]
+        for long_form, short_form in pairs:
+            for local_suffix, remote_suffix in ((long_form, short_form + '.'), (short_form, long_form)):
+                with self.subTest(local=local_suffix, remote=remote_suffix):
+                    self.person['person']['postal_addresses'][0]['address_lines'] = [f'123 Sample {local_suffix}']
+                    person = remote()
+                    person['postal_addresses'][0]['address_lines'] = [f'123 Sample {remote_suffix}']
+                    original_local, original_remote = deepcopy(self.person), deepcopy(person)
+                    self.results_by_filter(email_address=[person], phone_number=[person])
+                    result = self.client.check(self.person)
+                    self.assertEqual(result.outcome, 'existing')
+                    self.assertEqual(result.candidates[0]['differing_fields'], [])
+                    self.assertEqual(self.person, original_local)
+                    self.assertEqual(person, original_remote)
+
+    def test_street_suffix_matching_preserves_directions_names_and_unit_lines(self):
+        pairs = [
+            ('123 N Sample Street NW Apt 4', ['123 n sample st. nw', 'Apt 4']),
+            ('123 Sample Avenue Court', ['123 Sample Avenue Ct.']),
+            ('123 Saint John Road', ['123 Saint John Rd']),
+            ('123 Sample Street Unit A', ['123 Sample St.', 'Unit A']),
+            ('123 Sample Road #4', ['123 Sample Rd. #4']),
+        ]
+        for local_line, remote_lines in pairs:
+            with self.subTest(local=local_line, remote=remote_lines):
+                self.person['person']['postal_addresses'][0]['address_lines'] = [local_line]
+                person = remote()
+                person['postal_addresses'][0]['address_lines'] = remote_lines
+                self.results_by_filter(email_address=[person], phone_number=[person])
+                self.assertEqual(self.client.check(self.person).outcome, 'existing')
+
+    def test_street_suffix_matching_does_not_hide_real_or_ambiguous_differences(self):
+        pairs = [
+            ('123 Sample Road', '124 Sample Rd'),
+            ('12-14 Sample Street', '1214 Sample St'),
+            ('123 39.2 Road', '123 392 Rd'),
+            ('123 Saint John Road', '123 St John Rd'),
+            ('123 Dr Martin Street', '123 Doctor Martin St'),
+            ('123 Sample Avenue Court', '123 Sample Ave Ct'),
+            ('123 N Sample Street', '123 S Sample St'),
+            ('123 Sample Street NW', '123 Sample St'),
+            ('123 Sample Street North', '123 Sample St N'),
+            ('123 Sample Street Apt 4', '123 Sample St'),
+            ('123 Sample Street Apt 4', '123 Sample St Apt 5'),
+            ('123 Sample Street Apt 4', '123 Sample St Suite 4'),
+            ('123 Sample Road Unit ST', '123 Sample Rd Unit STREET'),
+            ('123 Sample Road Lot RD', '123 Sample Rd Lot ROAD'),
+            ('123 Sample Street Apt: Road', '123 Sample Street Apt: Rd'),
+            ('123 Sample Street Apartment, Road', '123 Sample Street Apartment, Rd'),
+            ('123 Main Road Door Street', '123 Main Road Door St'),
+            ('123 Main Street Front Road', '123 Main St Front Road'),
+            ('123 1/2 Road', '123 1/2 Rd'),
+            ('123 Sample Roads', '123 Sample Rd'),
+            ('123 Road', '123 Rd'),
+            ('123 Sample St.', '123 Sample St..'),
+            ('PO Box 123 Street', 'PO Box 123 St'),
+            ('123 County Road 7', '123 County Rd 7'),
+        ]
+        for local_line, remote_line in pairs:
+            with self.subTest(local=local_line, remote=remote_line):
+                self.person['person']['postal_addresses'][0]['address_lines'] = [local_line]
+                person = remote()
+                person['postal_addresses'][0]['address_lines'] = [remote_line]
+                self.results_by_filter(email_address=[person], phone_number=[person])
+                result = self.client.check(self.person)
+                self.assertEqual(result.outcome, 'needs_review')
+                self.assertEqual(result.candidates[0]['differing_fields'], ['address_line_1'])
+
     def test_single_contact_match_with_changed_other_contact_needs_review(self):
         cases = [
             ("email_address", remote(phone_numbers=[{"number": "12025550199"}]), "phone"),

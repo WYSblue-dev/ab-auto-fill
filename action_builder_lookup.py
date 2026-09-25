@@ -133,6 +133,73 @@ def _text(value: str) -> str:
     return " ".join(value.split()).casefold()
 
 
+# Deliberately limited to common primary/standard pairs from USPS Pub. 28 C1:
+# https://pe.usps.com/text/pub28/28apc_002.htm
+# This is a comparison aid, not address validation or a full postal parser.
+_STREET_SUFFIXES = {
+    "street": "st", "road": "rd", "avenue": "ave", "boulevard": "blvd",
+    "drive": "dr", "lane": "ln", "court": "ct", "circle": "cir",
+    "place": "pl", "parkway": "pkwy", "terrace": "ter", "trail": "trl",
+    "highway": "hwy",
+}
+_STREET_SUFFIXES.update({value: value for value in tuple(_STREET_SUFFIXES.values())})
+_DIRECTIONS = {
+    "n", "s", "e", "w", "ne", "nw", "se", "sw", "north", "south",
+    "east", "west", "northeast", "northwest", "southeast", "southwest",
+}
+# Freeze the entire secondary-address tail, including identifiers such as
+# "UNIT ST". Never mistake those identifiers for street suffixes (USPS C2).
+_UNIT_MARKERS = {
+    "apartment", "apt", "basement", "bsmt", "building", "bldg", "department",
+    "dept", "floor", "fl", "front", "frnt", "hangar", "hngr", "key", "lobby",
+    "lbby", "lot", "lower", "lowr", "office", "ofc", "penthouse", "ph",
+    "pier", "rear", "room", "rm", "side", "slip", "space", "spc", "stop",
+    "suite", "ste", "trailer", "trlr", "unit", "upper", "uppr",
+}
+
+
+def _street_text(value: str) -> str:
+    """Compare a numbered street's suffix while preserving all other tokens."""
+    text = _text(value)
+    tokens = text.split()
+    if (len(tokens) < 3 or not re.fullmatch(r"[0-9]+[a-z]?(?:-[0-9]+[a-z]?)?", tokens[0])
+            or re.fullmatch(r"[0-9]+/[0-9]+", tokens[1])):
+        return text  # PO boxes, rural routes and other formats remain exact.
+    street_end = next(
+        (index for index, token in enumerate(tokens[1:], 1)
+         if token.removesuffix(".") in _UNIT_MARKERS or token.startswith("#")),
+        len(tokens),
+    )
+    unit = tokens[street_end:]
+    if unit:
+        identifier = (unit[1] if len(unit) == 2 else
+                      unit[0][1:] if len(unit) == 1 and unit[0].startswith("#") else "")
+        if not (re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", identifier)
+                and (len(identifier) == 1 or any(char.isdigit() for char in identifier))):
+            # Unknown tails may be part of a street name, e.g. FRONT ROAD.
+            # Only recognize a simple unit with a number or single-letter ID.
+            return text
+    # Locate an optional postdirectional without changing or removing it.
+    if tokens[street_end - 1].removesuffix(".") in _DIRECTIONS:
+        street_end -= 1
+    suffix_index = street_end - 1
+    if suffix_index < 2:
+        return text  # Require separate house-number and street-name content.
+    suffix = _STREET_SUFFIXES.get(tokens[suffix_index].removesuffix("."))
+    if suffix is not None:
+        name_end = suffix_index
+        while name_end > 2 and tokens[name_end - 1].removesuffix(".") in _STREET_SUFFIXES:
+            name_end -= 1
+        if any(token.removesuffix(".") in _STREET_SUFFIXES for token in tokens[2:name_end]):
+            # An earlier suffix separated by other words could start an
+            # unsupported unit tail. Leave that ambiguous address exact.
+            return text
+        # Only this token may change: ST JOHN and MAIN AVENUE COURT retain
+        # their street-name words. House/unit numbers and punctuation survive.
+        tokens[suffix_index] = suffix
+    return " ".join(tokens)
+
+
 def _phone(value: str) -> str:
     # Compare US formatting variants, without silently stripping letters.
     if not re.fullmatch(r"[0-9+().\s-]+", value):
@@ -218,8 +285,8 @@ def _comparison(local: dict[str, Any], remote: dict[str, Any]) -> dict[str, bool
     for address in remote.get("postal_addresses", []):
         address_matches.append(
             {
-                "address_line_1": _text(" ".join(local_address["address_lines"]))
-                == _text(" ".join(address.get("address_lines", []))),
+                "address_line_1": _street_text(" ".join(local_address["address_lines"]))
+                == _street_text(" ".join(address.get("address_lines", []))),
                 **{
                     name: _text(local_address[name]) == _text(address.get(name, ""))
                     for name in ("locality", "region", "postal_code")

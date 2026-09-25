@@ -1,6 +1,7 @@
 """A successful HTTP status must include a usable person receipt."""
 
 from contextlib import redirect_stderr, redirect_stdout
+from copy import deepcopy
 import io
 import json
 from pathlib import Path
@@ -14,6 +15,7 @@ import send_person
 from send_person import submit_to_actionbuilder
 from test_send_queue import RECORD
 from test_lookup_queue import EXISTING, AMBIGUOUS
+from test_action_builder_lookup import collection, response
 
 
 CONFIG = ActionBuilderConfig("invented-token", "invented", "invented-campaign")
@@ -21,6 +23,60 @@ PERSON_ID = "action_builder:11111111-1111-4111-8111-111111111111"
 
 
 class SubmissionReceiptTests(unittest.TestCase):
+    def member_batch_with_remote_street(self, local_street, remote_street):
+        """Run real lookup/submission/member verification against an invented API."""
+        config = ActionBuilderConfig('invented-token', 'invented', 'invented-campaign', '1105')
+        record = {**RECORD, 'address_line_1': local_street, 'classification': 'CE/CW'}
+        remote = deepcopy(send_person.build_actionbuilder_payload(record)['person'])
+        remote['postal_addresses'][0]['address_lines'] = [remote_street]
+        remote['identifiers'] = [PERSON_ID]
+        remote['action_builder:latest_assessment'] = 1
+        tags = [{'action_builder:section': 'Fourth District Workers',
+                 'action_builder:field': field, 'name': name, 'action_builder:field_type': 'standard'}
+                for field, name in (('Classification - 4D', 'CE/CW'),
+                                    ('Local Jurisdiction by Zip (Residence) - 4D', '1105'))]
+        person_url = config.people_url + '/' + PERSON_ID.partition(':')[2]
+        posted = []
+        calls = []
+
+        def get(url, **kwargs):
+            calls.append(url)
+            if url == config.people_url:
+                # The two original searches see no entry; the fallback sees the creation.
+                return response(collection([remote] if posted else [], total_pages=1 if posted else 0))
+            if url == config.people_url.removesuffix('/people') + '/tags':
+                expression = kwargs['params']['filter']
+                return response({'page': 1, 'per_page': 25, 'total_pages': 1,
+                                 '_embedded': {'osdi:tags': [tag for tag in tags if expression == "name eq '" + tag['name'] + "'"]}})
+            if url == person_url:
+                return response(remote)
+            if url == person_url + '/taggings':
+                return response({'page': 1, 'per_page': 25, 'total_pages': 1,
+                                 '_embedded': {'osdi:taggings': tags}})
+            raise AssertionError('Unexpected mock GET route')
+
+        def post(url, **kwargs):
+            self.assertEqual(url, config.people_url)
+            posted.append(deepcopy(kwargs['json']))
+            return response({'unexpected_envelope': True}, status=201)
+
+        with tempfile.TemporaryDirectory() as directory:
+            queue_dir = Path(directory) / 'queue'
+            with RecordQueue(queue_dir) as queue:
+                queue.enqueue('example', record, {'invented-source'}, ['invented.pdf'])
+            with (patch.object(ActionBuilderConfig, 'from_environment', return_value=config),
+                  patch.object(send_person.requests, 'get', side_effect=get),
+                  patch.object(send_person.requests, 'post', side_effect=post) as create,
+                  patch.object(send_person.time, 'sleep'),
+                  patch('sys.argv', ['send_person.py', '--queue-dir', str(queue_dir), '--submit']),
+                  redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO())):
+                exit_code = send_person.main()
+                with RecordQueue(queue_dir) as queue:
+                    row = queue.snapshot()['records'][0]
+                self.assertEqual(send_person.main(), 0)
+                self.assertEqual(create.call_count, 1)
+        return exit_code, row, posted[0], calls, person_url
+
     def submit(self, document):
         response = Mock(status_code=201)
         response.json.return_value = document
@@ -118,6 +174,30 @@ class SubmissionReceiptTests(unittest.TestCase):
                     with self.assertRaises(send_person.SubmissionReceiptError):
                         submit_to_actionbuilder(send_person.build_actionbuilder_payload(RECORD), config=CONFIG)
                     post.assert_called_once()
+
+    def test_member_batch_unfamiliar_receipt_accepts_suffix_only_street_difference(self):
+        status, row, payload, calls, person_url = self.member_batch_with_remote_street(
+            '123 Sample Street', '123 Sample St.')
+        self.assertEqual(status, 0)
+        self.assertEqual(row['status'], 'sent')
+        self.assertEqual(row['result']['identifiers'], [PERSON_ID])
+        self.assertEqual(payload['person']['postal_addresses'][0]['address_lines'], ['123 Sample Street'])
+        self.assertEqual(payload['person']['action_builder:latest_assessment'], 1)
+        self.assertEqual(len(payload['add_tags']), 2)
+        self.assertEqual(calls.count(person_url.rsplit('/', 1)[0]), 4)  # Two prechecks and two receipt-fallback searches.
+        self.assertIn(person_url, calls)
+        self.assertIn(person_url + '/taggings', calls)
+
+    def test_member_batch_still_holds_different_house_or_unit_after_one_post(self):
+        for local_street, remote_street in (('123 Sample Street', '124 Sample St.'),
+                                            ('123 Sample Street Apt 2', '123 Sample St. Apt 3')):
+            with self.subTest(local_street=local_street, remote_street=remote_street):
+                status, row, payload, calls, person_url = self.member_batch_with_remote_street(local_street, remote_street)
+                self.assertEqual(status, 1)
+                self.assertEqual(row['status'], 'uncertain')
+                self.assertNotIn('result', row)
+                self.assertEqual(payload['person']['postal_addresses'][0]['address_lines'], [local_street])
+                self.assertNotIn(person_url, calls)  # Non-exact contact fallback never reaches member verification.
 
 
 if __name__ == "__main__":
