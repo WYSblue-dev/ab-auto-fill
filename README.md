@@ -69,6 +69,8 @@ The Terminal window stays open while the app runs. Use **Close app** in the brow
 3. **Results:** See confirmed submissions and their Action Builder person IDs.
 4. **Needs review:** Inspect candidate IDs, edit contact details, or discard an import with a reason. **Check revised details** is required before approving a separate person. Approval expires after ten minutes; a fresh lookup during submission must agree with the result you reviewed. Earlier uncertain attempts require checking Action Builder manually, and related successful submissions block another creation.
 
+**Check earlier attempt** means creation may have succeeded while confirmation failed. A later lookup can find the person created by that attempt; it does not mean they existed before you submitted. Check the existing entry, including both member tags and assessment **1** when configured, then select **Mark already created** and confirm. This performs read-only checks and moves the record to Results only after verification succeeds. If it remains held, the record retains the latest failure reason and any completed contact check. Check the named field or API error before trying reconciliation again; do not submit the person again to clear the hold.
+
 The GUI uses the existing `composed_info` queue and history. The CLI still works, but do not run it against the same queue while a GUI operation is running. Folder or parsing issues appear in Import; a record that cannot be extracted may require correcting the PDF and importing again.
 
 ### Updating an installation

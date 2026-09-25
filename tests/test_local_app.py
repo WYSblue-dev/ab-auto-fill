@@ -53,6 +53,36 @@ class LocalAppTests(unittest.TestCase):
     def review_data(self, item):
         return {'id': item.id, 'confirmed': True, 'checked': True, 'reason': 'Verified this is a separate person.'}
 
+    def uncertain_member(self):
+        self.app.settings.save({**self.data, 'residence_local': '1105'})
+        self.config = self.app.settings.config()
+        item = self.seed(person={**RECORD, 'classification': 'CE/CW'})
+        with RecordQueue(self.app.queue_dir) as queue:
+            queue.record_lookup(item, CLEAR.as_history(self.config))
+            queue.begin_send(item)
+            queue.mark_uncertain(item, 'Earlier sending attempt was not confirmed.')
+        self.lookup.return_value = EXISTING
+        data = {**self.review_data(item), 'destination': self.config.destination, 'residence_local': '1105'}
+        return item, data
+
+    @staticmethod
+    def member_verification_responses(*, assessment=1, omit_field=None):
+        person = {'identifiers': list(EXISTING.candidates[0]['identifiers']),
+                  'action_builder:latest_assessment': assessment}
+        tags = [{'action_builder:section': 'Fourth District Workers',
+                 'action_builder:field': field, 'name': value}
+                for field, value in (('Classification - 4D', 'CE/CW'),
+                                     ('Local Jurisdiction by Zip (Residence) - 4D', '1105'))
+                if field != omit_field]
+        collection = {'page': 1, 'per_page': 25, 'total_pages': 1,
+                      '_embedded': {'osdi:taggings': tags}}
+        responses = []
+        for document in (person, collection):
+            response = Mock(status_code=200)
+            response.json.return_value = document
+            responses.append(response)
+        return responses
+
     def test_first_run_creates_private_empty_env_and_preserves_existing_file(self):
         folder = self.root / 'first'
         folder.mkdir()
@@ -219,6 +249,22 @@ class LocalAppTests(unittest.TestCase):
         self.assertTrue(row['related_uncertain'])
         self.app.perform('send', self.batch_data())
         self.post.assert_called_once()
+        reopened = local_app.Application(self.root, self.app.queue_dir)
+        reason = reopened.state()['records'][0]['reason']
+        self.assertIn('Check your connection', reason)
+        self.assertNotIn('private URL', reason)
+
+    def test_member_submission_failure_reason_survives_reopening(self):
+        self.seed()
+        message = 'Classification - 4D was not confirmed. The API returned no response for this field.'
+        self.post.side_effect = local_app.MemberAutomationError(message)
+        with self.assertRaises(local_app.MemberAutomationError):
+            self.app.perform('send', self.batch_data())
+        reopened = local_app.Application(self.root, self.app.queue_dir)
+        row = reopened.state()['records'][0]
+        self.assertEqual(row['status'], 'uncertain')
+        self.assertEqual(row['reason'], 'Sending stopped: ' + message)
+        self.post.assert_called_once()
 
     def test_review_requires_displayed_fresh_check_and_explicit_acknowledgment(self):
         item = self.seed(held=True)
@@ -286,6 +332,113 @@ class LocalAppTests(unittest.TestCase):
         self.app.perform('review-reconcile', data)
         self.post.assert_not_called()
         self.assertEqual(self.app.state()['records'][0]['status'], 'sent')
+
+    def test_configured_reconcile_verifies_both_tags_and_assessment_without_post(self):
+        item, data = self.uncertain_member()
+        with patch.object(requests, 'get', side_effect=self.member_verification_responses()) as get:
+            self.app.perform('review-reconcile', data)
+        self.assertEqual(get.call_count, 2)
+        self.assertTrue(get.call_args_list[0].args[0].endswith('/people/' + EXISTING.candidates[0]['identifiers'][0].partition(':')[2]))
+        self.assertTrue(get.call_args_list[1].args[0].endswith('/taggings'))
+        self.post.assert_not_called()
+        reopened = local_app.Application(self.root, self.app.queue_dir)
+        row = reopened.state()['records'][0]
+        self.assertEqual(row['id'], item.id)
+        self.assertEqual(row['status'], 'sent')
+        self.assertEqual(row['lookup']['outcome'], 'existing')
+        self.assertEqual(row['result']['identifiers'], EXISTING.candidates[0]['identifiers'])
+
+    def test_reconcile_assessment_failure_preserves_latest_match_and_reason(self):
+        _, data = self.uncertain_member()
+        with patch.object(requests, 'get', side_effect=self.member_verification_responses(assessment=None)):
+            with self.assertRaisesRegex(local_app.MemberAutomationError, 'Assessment 1'):
+                self.app.perform('review-reconcile', data)
+        reopened = local_app.Application(self.root, self.app.queue_dir)
+        row = reopened.state()['records'][0]
+        self.assertEqual(row['status'], 'uncertain')
+        self.assertEqual(row['lookup']['outcome'], 'existing')
+        self.assertIn('Assessment 1 was not confirmed', row['reason'])
+        self.assertIn('did not return an assessment', row['reason'])
+        self.post.assert_not_called()
+
+    def test_reconcile_missing_tag_stays_uncertain_and_names_the_field(self):
+        _, data = self.uncertain_member()
+        with patch.object(requests, 'get', side_effect=self.member_verification_responses(omit_field='Classification - 4D')):
+            with self.assertRaisesRegex(local_app.MemberAutomationError, 'Classification - 4D'):
+                self.app.perform('review-reconcile', data)
+        row = self.app.state()['records'][0]
+        self.assertEqual(row['status'], 'uncertain')
+        self.assertEqual(row['lookup']['outcome'], 'existing')
+        self.assertIn('Classification - 4D', row['reason'])
+        self.post.assert_not_called()
+
+    def test_reconcile_nonexact_match_saves_current_differing_fields(self):
+        _, data = self.uncertain_member()
+        self.lookup.return_value = AMBIGUOUS
+        with patch.object(local_app.MemberAutomationClient, 'verify') as verify:
+            with self.assertRaisesRegex(ValueError, 'exact matching person'):
+                self.app.perform('review-reconcile', data)
+            verify.assert_not_called()
+        row = self.app.state()['records'][0]
+        self.assertEqual(row['status'], 'uncertain')
+        self.assertEqual(row['lookup']['outcome'], 'needs_review')
+        self.assertEqual(row['lookup']['candidates'][0]['differing_fields'], ['phone'])
+        self.assertIn('latest matching and differing fields', row['reason'])
+        self.post.assert_not_called()
+
+    def test_reconcile_request_error_is_persisted_without_raw_request_details(self):
+        _, data = self.uncertain_member()
+        self.lookup.side_effect = requests.Timeout('https://private.invalid/?token=test-secret&email=private@example.test')
+        self.app._work('review-reconcile', data)
+        self.assertTrue(self.app.status()['error'])
+        reopened = local_app.Application(self.root, self.app.queue_dir)
+        row = reopened.state()['records'][0]
+        self.assertEqual(row['status'], 'uncertain')
+        self.assertEqual(row['lookup']['outcome'], 'not_found')
+        self.assertIn('Check your connection', row['reason'])
+        for text in (row['reason'], self.app.status()['message']):
+            self.assertNotIn('private.invalid', text)
+            self.assertNotIn('test-secret', text)
+            self.assertNotIn('private@example.test', text)
+        self.post.assert_not_called()
+
+    def test_reconcile_checks_saved_destination_before_replacing_lookup(self):
+        _, data = self.uncertain_member()
+        original = self.app.state()['records'][0]['lookup']
+        self.app.settings.save({**self.data, 'campaign_id': 'other-campaign', 'residence_local': '1105'})
+        current = self.app.settings.config().destination
+        with self.assertRaisesRegex(ValueError, 'saved submission lookup'):
+            self.app.perform('review-reconcile', {**data, 'destination': current})
+        self.lookup.assert_not_called()
+        row = self.app.state()['records'][0]
+        self.assertEqual(row['lookup'], original)
+        self.assertEqual(row['status'], 'uncertain')
+        self.post.assert_not_called()
+
+    def test_reconcile_rejects_stale_confirmation_destination_or_residence_local(self):
+        _, data = self.uncertain_member()
+        for changed in ({'destination': {'subdomain': 'example', 'campaign_id': 'other-campaign'}},
+                        {'residence_local': '999'}):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, 'changed'):
+                self.app.perform('review-reconcile', {**data, **changed})
+        self.lookup.assert_not_called()
+        self.post.assert_not_called()
+
+    def test_review_check_cannot_replace_uncertain_submission_destination(self):
+        item, data = self.uncertain_member()
+        original = self.app.state()['records'][0]['lookup']
+        self.app.settings.save({**self.data, 'campaign_id': 'other-campaign', 'residence_local': '1105'})
+        with self.assertRaises(local_app.QueueError):
+            self.app.perform('review-check', {'id': item.id})
+        self.lookup.assert_called_once()
+        current = self.app.settings.config().destination
+        with self.assertRaisesRegex(ValueError, 'saved submission lookup'):
+            self.app.perform('review-reconcile', {**data, 'destination': current})
+        self.lookup.assert_called_once()  # Reconciliation stops before a second lookup.
+        row = self.app.state()['records'][0]
+        self.assertEqual(row['lookup'], original)
+        self.assertEqual(row['status'], 'uncertain')
+        self.post.assert_not_called()
 
     def test_review_corrections_and_discard_preserve_history(self):
         item = self.seed(held=True)

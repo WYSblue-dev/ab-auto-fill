@@ -804,6 +804,9 @@ class RecordQueue:
         self._validate_lookup(lookup)
         entry = self._entry_for(item)
         self._require_review(entry)
+        prior = entry.get("lookup")
+        if entry["status"] == "uncertain" and prior and prior["destination"] != lookup["destination"]:
+            raise QueueError("The verification campaign must match the saved submission lookup. Restore that campaign before checking this uncertain attempt.")
         timestamp = _now()
         entry.update(lookup=json.loads(json.dumps(lookup)), updated_at=timestamp)
         entry.setdefault("decisions", []).append({

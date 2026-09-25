@@ -156,6 +156,57 @@ class MemberAutomationTests(unittest.TestCase):
                 send_person.submit_to_actionbuilder(send_person.build_actionbuilder_payload({**RECORD,'classification':'CE/CW'}),config=CONFIG)
         post.assert_called_once()
 
+    def test_member_submission_does_not_require_post_receipt_to_echo_tags_or_assessment(self):
+        payload = member_payload()
+        receipt = {'person': {'identifiers': [IDENTIFIER]}}
+        documents = [
+            {'identifiers': [IDENTIFIER], 'action_builder:latest_assessment': 1},
+            collection('osdi:taggings', payload['add_tags']),
+        ]
+        with (patch('send_person.requests.post', return_value=response(receipt)) as post,
+              patch('member_automation.requests.get', side_effect=[response(doc) for doc in documents]) as get):
+            result = send_person.submit_to_actionbuilder(payload, config=CONFIG, member_preflight=True)
+        self.assertEqual(result, receipt)
+        post.assert_called_once()
+        self.assertEqual(post.call_args.kwargs['json']['person']['action_builder:latest_assessment'], 1)
+        self.assertEqual(post.call_args.kwargs['json']['add_tags'], payload['add_tags'])
+        self.assertEqual(get.call_count, 2)
+
+    def test_verification_distinguishes_identity_and_assessment_failures_without_response_text(self):
+        person = {'identifiers':[IDENTIFIER], 'action_builder:latest_assessment':1}
+        cases = (
+            ({**person, 'identifiers':[]}, 'confirmed person ID'),
+            ({'identifiers':[IDENTIFIER]}, 'did not return an assessment'),
+            ({**person, 'action_builder:latest_assessment':2}, 'returned assessment 2'),
+            ({**person, 'action_builder:latest_assessment':True}, 'unexpected format'),
+            ({**person, 'action_builder:latest_assessment':'private remote text'}, 'unexpected format'),
+        )
+        for observed, message in cases:
+            with self.subTest(message=message), patch.object(MemberAutomationClient, 'get', return_value=observed) as get:
+                with self.assertRaisesRegex(MemberAutomationError, message) as caught:
+                    MemberAutomationClient(CONFIG).verify(member_payload(), SUCCESS)
+                self.assertNotIn('private remote text', str(caught.exception))
+                get.assert_called_once()
+
+    def test_verification_identifies_which_member_field_failed_and_why(self):
+        payload = member_payload()
+        person = {'identifiers':[IDENTIFIER], 'action_builder:latest_assessment':1}
+        for index, field in enumerate((CLASSIFICATION_FIELD, JURISDICTION_FIELD)):
+            expected = payload['add_tags'][index]
+            other = payload['add_tags'][1-index]
+            cases = (
+                ([other], 'no response'),
+                ([other, expected, expected], '2 responses'),
+                ([other, {**expected, 'name':'private remote text'}], 'did not match'),
+            )
+            for observed, message in cases:
+                with self.subTest(field=field, message=message), patch.object(MemberAutomationClient, 'get', side_effect=[person, collection('osdi:taggings', observed)]):
+                    with self.assertRaises(MemberAutomationError) as caught:
+                        MemberAutomationClient(CONFIG).verify(payload, SUCCESS)
+                    self.assertIn(field, str(caught.exception))
+                    self.assertIn(message, str(caught.exception))
+                    self.assertNotIn('private remote text', str(caught.exception))
+
     def test_collection_rejects_missing_rows_and_accepts_explicit_zero_pages(self):
         client=MemberAutomationClient(CONFIG)
         with patch.object(client,'get',return_value={'page':1,'per_page':25,'total_pages':0}):

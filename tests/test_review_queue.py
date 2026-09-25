@@ -290,6 +290,49 @@ class ReviewQueueTests(unittest.TestCase):
             self.assertEqual(sum(decision["action"] == "approved_send"
                                  for decision in self.state()["records"][item.id]["decisions"]), 2)
 
+    def test_uncertain_lookup_rejects_changed_destination_without_replacing_saved_evidence(self):
+        with RecordQueue(self.directory) as queue:
+            item = self.held(queue)
+            self.approve(queue, item)
+            queue.mark_uncertain(item, "Invented timeout.")
+        with RecordQueue(self.directory) as queue:
+            item = queue.review_records()[0]
+            before = self.state()
+            for key, value in (("campaign_id", "other-campaign"), ("subdomain", "other-organization")):
+                changed = CLEAR.as_history(CONFIG)
+                changed["destination"][key] = value
+                with self.subTest(key=key), self.assertRaisesRegex(QueueError, "saved submission lookup"):
+                    queue.record_review_lookup(item, changed)
+                self.assertEqual(self.state(), before)
+                self.assertEqual(queue.review_details(item)["lookup"], before["records"][item.id]["lookup"])
+        with RecordQueue(self.directory) as queue:
+            item = queue.review_records()[0]
+            self.assertEqual(queue.review_details(item)["status"], "uncertain")
+            self.assertEqual(queue.review_details(item)["lookup"], before["records"][item.id]["lookup"])
+
+    def test_uncertain_lookup_accepts_updated_evidence_in_same_destination(self):
+        with RecordQueue(self.directory) as queue:
+            item = self.held(queue)
+            self.approve(queue, item)
+            queue.mark_uncertain(item, "Invented timeout.")
+            refreshed = CLEAR.as_history(CONFIG)
+            refreshed["reason"] = "Fresh contact check completed after the unconfirmed attempt."
+            queue.record_review_lookup(item, refreshed)
+            self.assertEqual(queue.review_details(item)["lookup"], refreshed)
+            self.assertEqual(queue.review_details(item)["status"], "uncertain")
+        with RecordQueue(self.directory) as queue:
+            self.assertEqual(queue.review_details(queue.review_records()[0])["lookup"], refreshed)
+
+    def test_unattempted_review_lookup_can_change_destination(self):
+        with RecordQueue(self.directory) as queue:
+            item = self.held(queue)
+            queue.record_review_lookup(item, CLEAR.as_history(CONFIG))
+            changed = CLEAR.as_history(CONFIG)
+            changed["destination"]["campaign_id"] = "other-campaign"
+            queue.record_review_lookup(item, changed)
+            self.assertEqual(queue.review_details(item)["lookup"], changed)
+            self.assertEqual(queue.review_details(item)["status"], "review")
+
     def test_uncertainty_survives_edit_of_prior_attempt(self):
         with RecordQueue(self.directory) as queue:
             item = self.held(queue)

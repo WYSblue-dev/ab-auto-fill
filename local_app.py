@@ -273,9 +273,9 @@ class Application:
             options = {'member_preflight': True} if payload.get('add_tags') else {}
             receipt = submit_to_actionbuilder(payload, config=config, **options)
             queue.finish_send(item, receipt)
-        except BaseException:
+        except BaseException as error:
             try:
-                queue.mark_uncertain(item, 'The sending attempt did not finish reliably. Check Action Builder before retrying.')
+                queue.mark_uncertain(item, 'Sending stopped: ' + safe_error(error))
             except (OSError, QueueError):
                 pass
             raise
@@ -391,22 +391,42 @@ class Application:
                 queue.discard_review(item, data.get('reason', ''))
                 self.approvals.pop(item.id, None)
                 return 'Import discarded. Its history is retained to prevent reimporting it.'
-            config = self.settings.config()
-            payload = prepare_member_payload(build_actionbuilder_payload(load_approved_person(item.path)), config)
             details = queue.review_details(item)
             if action == 'review-reconcile':
-                if data.get('confirmed') is not True or data.get('checked') is not True:
-                    raise ValueError('Confirm that the person already exists with the correct details in Action Builder.')
-                if data.get('destination') != config.destination:
-                    raise ValueError('The destination changed. Review the current campaign before reconciling.')
-                result = ActionBuilderLookup(config).check(payload)
-                if result.outcome != 'existing':
-                    raise ValueError('Reconciliation requires one exact matching person. Keep this record held.')
-                MemberAutomationClient(config).verify(payload, {'person':{'identifiers':result.candidates[0]['identifiers']}})
-                queue.reconcile_sent(item, lookup=result.as_history(config),
-                                     reason='Earlier submission verified by the operator and fresh exact email and phone matches; reconciled without sending again.')
+                try:
+                    if details['status'] != 'uncertain':
+                        raise ValueError('Only an uncertain submission can be marked already created here.')
+                    if data.get('confirmed') is not True or data.get('checked') is not True:
+                        raise ValueError('Confirm that the person already exists with the correct details in Action Builder.')
+                    config = self.settings.config()
+                    if data.get('destination') != config.destination:
+                        raise ValueError('The destination changed. Review the current campaign before reconciling.')
+                    if data.get('residence_local', '') != config.residence_local:
+                        raise ValueError('The residence local changed. Review the current member settings before reconciling.')
+                    prior = details.get('lookup')
+                    if not prior or prior['destination'] != config.destination:
+                        raise ValueError('The verification campaign must match the saved submission lookup. Restore that campaign in Settings before reconciling.')
+                    payload = prepare_member_payload(build_actionbuilder_payload(load_approved_person(item.path)), config)
+                    result = ActionBuilderLookup(config).check(payload)
+                    # Check the prior destination above before replacing lookup evidence.
+                    # Failed reconciliation must still show the newly found candidates.
+                    queue.record_review_lookup(item, result.as_history(config))
+                    if result.outcome != 'existing':
+                        raise ValueError('Reconciliation requires one exact matching person. Review the latest matching and differing fields below; keep this record held.')
+                    MemberAutomationClient(config).verify(payload, {'person':{'identifiers':result.candidates[0]['identifiers']}})
+                    queue.reconcile_sent(item, lookup=result.as_history(config),
+                                         reason='Earlier submission verified by the operator and fresh exact email and phone matches; reconciled without sending again.')
+                except Exception as error:
+                    if details['status'] == 'uncertain':
+                        try:
+                            queue.mark_uncertain(item, 'Verification stopped: ' + safe_error(error))
+                        except (OSError, QueueError):
+                            pass  # A failed queue commit must be recovered on reopening.
+                    raise
                 self.approvals.pop(item.id, None)
                 return 'Earlier submission marked complete locally. No person was created or changed in Action Builder.'
+            config = self.settings.config()
+            payload = prepare_member_payload(build_actionbuilder_payload(load_approved_person(item.path)), config)
             if action == 'review-send':
                 approval = self.approvals.pop(item.id, None)
                 if (approval is None or approval['config'] != self.config_signature()

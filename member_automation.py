@@ -120,11 +120,27 @@ class MemberAutomationClient:
             raise MemberAutomationError('Cannot verify member tags without one confirmed person ID.')
         person_path = '/people/' + native[0].partition(':')[2]
         person = self.get(person_path)
-        if (not isinstance(person.get('identifiers'),list) or person['identifiers'].count(native[0]) != 1
-                or type(person.get('action_builder:latest_assessment')) is not int or person['action_builder:latest_assessment'] != 1):
-            raise MemberAutomationError('The person exists, but assessment 1 was not confirmed. Review and correct the existing entry, then reconcile; do not create another person.')
+        if not isinstance(person.get('identifiers'),list) or person['identifiers'].count(native[0]) != 1:
+            raise MemberAutomationError('The person lookup did not return the confirmed person ID. Keep the record held; do not create another person.')
+        assessment = person.get('action_builder:latest_assessment')
+        if type(assessment) is not int or assessment != 1:
+            if assessment is None:
+                detail = 'The API did not return an assessment.'
+            elif type(assessment) is int:
+                detail = f'The API returned assessment {assessment}.'
+            else:
+                # Describe the shape, never include arbitrary API response text.
+                detail = 'The API returned an assessment in an unexpected format.'
+            raise MemberAutomationError(f'Assessment 1 was not confirmed. {detail} Review the existing entry, then reconcile; do not create another person.')
         tags = self.collection(person_path+'/taggings','osdi:taggings')
         for expected in payload['add_tags']:
             values = [row for row in tags if row.get('action_builder:section')==expected['action_builder:section'] and row.get('action_builder:field')==expected['action_builder:field']]
             if len(values)!=1 or values[0].get('name')!=expected['name']:
-                raise MemberAutomationError('The person exists, but a member tag is missing, conflicting, or unconfirmed. Review the existing entry, then reconcile; do not create another person.')
+                label = 'Classification - 4D' if expected['action_builder:field'] == CLASSIFICATION_FIELD else 'Local Jurisdiction by Zip (Residence) - 4D'
+                if not values:
+                    detail = 'The API returned no response for this field.'
+                elif len(values) != 1:
+                    detail = f'The API returned {len(values)} responses for this field; one is required.'
+                else:
+                    detail = 'The API response did not match the configured value.'
+                raise MemberAutomationError(f'{label} was not confirmed. {detail} Review the existing entry, then reconcile; do not create another person.')
