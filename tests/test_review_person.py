@@ -40,12 +40,14 @@ class ReviewPersonTests(unittest.TestCase):
     def state(self):
         return json.loads((self.queue_dir / STATE_NAME).read_text(encoding="utf-8"))
 
-    def seed_uncertain(self):
+    def seed_uncertain(self, *, with_receipt=False):
         with RecordQueue(self.queue_dir) as queue:
             queue.enqueue("uncertain-person", RECORD, {"one"}, ["one.pdf"])
             item = queue.pending_records()[0]
             queue.record_lookup(item, CLEAR.as_history(CONFIG))
             queue.begin_send(item)
+            if with_receipt:
+                queue.record_person_receipt(item, SUCCESS, destination=CONFIG.destination)
             queue.mark_uncertain(item, "An invented earlier send timed out.")
         return item
 
@@ -232,13 +234,15 @@ class ReviewPersonTests(unittest.TestCase):
             real_claim(queue, selected, **kwargs)
             events.append("claim")
 
-        def submit(payload, *, config):
+        def submit(payload, *, config, on_person_receipt):
             self.assertEqual(events[-1], "claim")
             self.assertIs(config, CONFIG)
             saved = self.state()["records"][item.id]
             self.assertEqual(saved["status"], "sending")
             self.assertEqual(saved["decisions"][-1]["action"], "approved_send")
             events.append("post")
+            on_person_receipt(SUCCESS)
+            self.assertIn('pending_receipt', self.state()['records'][item.id])
             return SUCCESS
 
         with patch.object(RecordQueue, "begin_review_send", autospec=True, side_effect=claim):
@@ -374,6 +378,57 @@ class ReviewPersonTests(unittest.TestCase):
             self.assertTrue((self.queue_dir / "sent" / item.path.name).exists())
             queue.enqueue(item.family, RECORD, {"one"}, ["one.pdf"])
             self.assertEqual(queue.pending_records(), [])
+
+    def test_reconcile_saved_person_uses_direct_id_without_search_or_post(self):
+        self.seed_uncertain(with_receipt=True)
+        response = Mock(status_code=200)
+        response.json.return_value = {'identifiers': SUCCESS['person']['identifiers']}
+        with RecordQueue(self.queue_dir) as queue:
+            item = queue.review_records()[0]
+            with (patch.object(review_person.ActionBuilderConfig, 'from_environment', return_value=CONFIG),
+                  patch.object(review_person.ActionBuilderLookup, 'check') as lookup,
+                  patch('requests.get', return_value=response) as get,
+                  patch('requests.post') as post,
+                  patch.object(review_person, 'confirm', return_value=True),
+                  patch('time.sleep'), redirect_stdout(io.StringIO())):
+                self.assertTrue(review_person.reconcile_person(queue, item, RECORD, checked=True))
+            lookup.assert_not_called()
+            post.assert_not_called()
+            get.assert_called_once()
+            self.assertTrue(get.call_args.args[0].endswith('/people/' + SUCCESS['person']['identifiers'][0].partition(':')[2]))
+        entry = self.state()['records'][item.id]
+        self.assertEqual(entry['status'], 'sent')
+        self.assertNotIn('pending_receipt', entry)
+
+    def test_saved_person_cannot_be_sent_again_from_cli(self):
+        item = self.seed_uncertain(with_receipt=True)
+        status, output, errors = self.run_cli(['y', 's'])
+        self.assertEqual(status, 0, errors)
+        self.last_lookup.assert_not_called()
+        self.last_submit.assert_not_called()
+        self.assertIn('confirmed person ID', output)
+        self.assertEqual(self.state()['records'][item.id]['status'], 'uncertain')
+
+    def test_saved_person_verification_requires_current_destination_and_matching_id(self):
+        self.seed_uncertain(with_receipt=True)
+        wrong_config = review_person.ActionBuilderConfig('token', 'other', 'campaign')
+        with RecordQueue(self.queue_dir) as queue:
+            item = queue.review_records()[0]
+            with (patch.object(review_person.ActionBuilderConfig, 'from_environment', return_value=wrong_config),
+                  patch('requests.get') as get, patch('requests.post') as post,
+                  redirect_stdout(io.StringIO())):
+                self.assertFalse(review_person.reconcile_person(queue, item, RECORD, checked=True))
+            get.assert_not_called()
+            post.assert_not_called()
+            response = Mock(status_code=200)
+            response.json.return_value = {'identifiers': ['action_builder:22222222-2222-4222-8222-222222222222']}
+            with (patch.object(review_person.ActionBuilderConfig, 'from_environment', return_value=CONFIG),
+                  patch('requests.get', return_value=response), patch('requests.post') as post,
+                  patch('time.sleep'), redirect_stdout(io.StringIO())):
+                with self.assertRaisesRegex(RuntimeError, 'confirmed person ID'):
+                    review_person.reconcile_person(queue, item, RECORD, checked=True)
+            post.assert_not_called()
+            self.assertEqual(queue.review_details(item)['status'], 'uncertain')
 
     def test_reconcile_declined_unchecked_or_nonexact_match_stays_held(self):
         item = self.seed_uncertain()

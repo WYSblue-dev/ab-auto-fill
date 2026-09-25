@@ -132,6 +132,8 @@ def show_review(queue: RecordQueue, item: QueueItem, record: dict[str, Any]) -> 
     print()
     if details["related_sent"]:
         print("A related record was already sent. Creating another person here is blocked.")
+    elif details.get("related_created"):
+        print("Action Builder returned a person ID. Verification is pending; creating another person is blocked.")
     elif details["related_uncertain"]:
         print("An earlier related send may have succeeded. Check that attempt in Action Builder before retrying.")
 
@@ -189,6 +191,9 @@ def review_send(
     if details["related_sent"]:
         print("Not sent: a related record already has a successful sending receipt.")
         return False
+    if details.get("related_created"):
+        print("Not sent: a related record has a confirmed person ID. Reconcile that earlier attempt instead.")
+        return False
     normalize_review_record(record)
     payload = build_actionbuilder_payload(record)
     config = ActionBuilderConfig.from_environment()
@@ -234,7 +239,11 @@ def review_send(
     queue.begin_review_send(item, config_destination=config.destination, reason=reason)
     try:
         options = {"member_preflight": True} if payload.get("add_tags") else {}
-        response = submit_to_actionbuilder(payload, config=config, **options)
+        response = submit_to_actionbuilder(
+            payload, config=config, **options,
+            on_person_receipt=lambda receipt: queue.record_person_receipt(
+                item, receipt, destination=config.destination),
+        )
         queue.finish_send(item, response)
     except BaseException:
         # A timeout, interruption, or failed local receipt write can follow creation.
@@ -262,6 +271,22 @@ def reconcile_person(queue: RecordQueue, item: QueueItem, record: dict[str, Any]
         print("Kept for review. Check the earlier uncertain submission in Action Builder first.")
         return False
     config = ActionBuilderConfig.from_environment()
+    saved = queue.pending_person_receipt(item)
+    if saved is not None:
+        if saved['destination'] != config.destination:
+            print("Kept for review. Configure the campaign saved with this person's receipt.")
+            return False
+        payload = prepare_member_payload(build_actionbuilder_payload(record), config)
+        MemberAutomationClient(config).verify(
+            payload, {'person': {'identifiers': saved['identifiers']}}, require_person=True)
+        if not confirm("Mark the saved person complete after verifying their ID and configured member details? Nothing will be sent"):
+            print("Kept for later review.")
+            return False
+        queue.finish_person_verification(
+            item, destination=config.destination, identifiers=saved['identifiers'],
+            reason="Saved person ID and configured member details verified using read-only requests; no person sent again.")
+        print("Marked complete and moved to sent. No POST or update was made to Action Builder.")
+        return True
     if not details.get("lookup") or details["lookup"]["destination"] != config.destination:
         print("Kept for review. Configure the same campaign used for the saved submission check.")
         return False

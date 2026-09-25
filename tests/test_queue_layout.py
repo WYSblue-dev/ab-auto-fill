@@ -121,7 +121,7 @@ class QueueLayoutTests(unittest.TestCase):
                                  "uncertain" if status == "sending" else status)
                 self.assertTrue(queue.known_sources(f"{status}-organized", {f"source-{status}"}))
         state = json.loads((self.queue_dir / ".queue-state.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["version"], 3)
+        self.assertEqual(state["version"], 4)
 
     def test_partially_moved_legacy_queue_finishes_migration(self):
         filenames = self.seed_flat_v1(("pending", "sent"))

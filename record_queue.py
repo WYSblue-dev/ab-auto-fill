@@ -34,6 +34,7 @@ CONTACT_FIELDS = {
 STATUSES = {"pending", "review", "sending", "sent", "uncertain", "discarded"}
 ATTEMPTED = {"sending", "sent", "uncertain"}
 ID_PATTERN = re.compile(r"[0-9a-f]{64}")
+PERSON_ID_PATTERN = re.compile(r"action_builder:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
 
 class QueueError(ValueError):
@@ -144,11 +145,11 @@ class RecordQueue:
             if state_path.exists() or state_path.is_symlink():
                 self._state = _load_json(state_path)
             else:
-                self._state = {"version": 3, "families": {}, "records": {}}
+                self._state = {"version": 4, "families": {}, "records": {}}
             # Validate every file before migration or recovery moves anything.
             self._validate(reconcile=False)
-            migrated = self._state["version"] != 3
-            self._state["version"] = 3
+            migrated = self._state["version"] != 4
+            self._state["version"] = 4
             # A crash after a claim may have happened after the server accepted it.
             recovered = False
             for entry in self._state["records"].values():
@@ -256,7 +257,7 @@ class RecordQueue:
 
     def _validate(self, *, reconcile: bool = True) -> None:
         state = self._require_open()
-        if not isinstance(state, dict) or set(state) != {"version", "families", "records"} or type(state["version"]) is not int or state["version"] not in {1, 2, 3}:
+        if not isinstance(state, dict) or set(state) != {"version", "families", "records"} or type(state["version"]) is not int or state["version"] not in {1, 2, 3, 4}:
             raise QueueError("The queue history format is unsupported or damaged.")
         families, records = state["families"], state["records"]
         if not isinstance(families, dict) or not isinstance(records, dict):
@@ -265,12 +266,20 @@ class RecordQueue:
             self._filename(identifier)
             if not isinstance(entry, dict) or not isinstance(entry.get("status"), str) or entry["status"] not in STATUSES:
                 raise QueueError("A queue record has an invalid status.")
-            if set(entry) - {"status", "created_at", "updated_at", "reason", "result", "lookup", "decisions", "replacement_id"}:
+            if set(entry) - {"status", "created_at", "updated_at", "reason", "result", "lookup", "decisions", "replacement_id", "pending_receipt"}:
                 raise QueueError("A queue record contains unexpected history fields.")
             if any(not isinstance(entry.get(key), str) for key in ("created_at", "updated_at")):
                 raise QueueError("A queue record is missing its history.")
             if "lookup" in entry:
                 self._validate_lookup(entry["lookup"])
+            if "pending_receipt" in entry:
+                if state["version"] < 4:
+                    raise QueueError("A saved person receipt requires queue version 4.")
+                self._validate_pending_receipt(entry["pending_receipt"])
+                if (entry["status"] not in {"sending", "uncertain", "discarded"}
+                        or "result" in entry or not entry.get("lookup")
+                        or entry["lookup"]["destination"] != entry["pending_receipt"]["destination"]):
+                    raise QueueError("A saved person receipt conflicts with its sending history.")
             self._validate_decisions(identifier, entry, records)
             if state["version"] < 3 and (entry["status"] == "discarded" or "decisions" in entry or "replacement_id" in entry):
                 raise QueueError("Manual review history requires queue version 3.")
@@ -399,7 +408,8 @@ class RecordQueue:
 
     def _attempted(self, family: dict[str, Any]) -> bool:
         records = self._require_open()["records"]
-        return any(records[identifier]["status"] in ATTEMPTED for identifier in family["record_ids"])
+        return any(records[identifier]["status"] in ATTEMPTED or "pending_receipt" in records[identifier]
+                   for identifier in family["record_ids"])
 
     @staticmethod
     def _validate_decisions(identifier: str, entry: dict, records: dict) -> None:
@@ -445,6 +455,30 @@ class RecordQueue:
         if (not isinstance(destination, dict) or set(destination) != {"subdomain", "campaign_id"}
                 or any(not isinstance(value, str) or not value.strip() for value in destination.values())):
             raise QueueError("An Action Builder lookup is missing its destination.")
+
+    @staticmethod
+    def _native_person_id(receipt: Any) -> str:
+        person = receipt.get("person") if isinstance(receipt, dict) else None
+        identifiers = person.get("identifiers") if isinstance(person, dict) else None
+        if (not isinstance(identifiers, list)
+                or any(not isinstance(value, str) or not value for value in identifiers)):
+            raise QueueError("A person receipt requires one valid Action Builder person ID.")
+        native = [value for value in identifiers if value.startswith("action_builder:")]
+        if len(native) != 1 or not PERSON_ID_PATTERN.fullmatch(native[0]):
+            raise QueueError("A person receipt requires one valid Action Builder person ID.")
+        if "error" in receipt or "errors" in receipt:
+            raise QueueError("An API error is not a confirmed person receipt.")
+        return native[0]
+
+    @staticmethod
+    def _validate_pending_receipt(receipt: Any) -> None:
+        if not isinstance(receipt, dict) or set(receipt) != {"identifiers", "destination"}:
+            raise QueueError("A saved person receipt contains invalid fields.")
+        RecordQueue._validate_destination(receipt["destination"])
+        identifiers = receipt["identifiers"]
+        if (not isinstance(identifiers, list) or len(identifiers) != 1
+                or not isinstance(identifiers[0], str) or not PERSON_ID_PATTERN.fullmatch(identifiers[0])):
+            raise QueueError("A saved person receipt requires one valid Action Builder person ID.")
 
     @staticmethod
     def _validate_lookup(lookup: Any) -> None:
@@ -725,9 +759,11 @@ class RecordQueue:
             "status": entry["status"],
             "reason": entry.get("reason") or "; ".join(reasons) or "This record needs manual review.",
             "lookup": json.loads(json.dumps(entry.get("lookup"))),
+            "pending_receipt": json.loads(json.dumps(entry.get("pending_receipt"))),
             "source_names": sorted({name for family in families.values() for name in family["source_names"]}),
             "families": sorted(families),
             "related_sent": any(record["status"] == "sent" or "result" in record for record in records),
+            "related_created": any("pending_receipt" in record for record in records),
             "related_uncertain": any(record["status"] in {"sending", "uncertain"}
                                      or any(decision["previous_status"] == "uncertain"
                                             for decision in record.get("decisions", []))
@@ -750,6 +786,8 @@ class RecordQueue:
         self._validate()
         entry = self._entry_for(item)
         self._require_review(entry)
+        if self.review_details(item)["related_created"]:
+            raise QueueError("Verify the created person before replacing this local record. A related person receipt is still awaiting verification.")
         digest = hashlib.sha256(_record_bytes(record)).hexdigest()
         if digest == item.id:
             return QueueItem(item.id, self._path(item.id), item.family)
@@ -835,12 +873,16 @@ class RecordQueue:
         if (candidate["differing_fields"] or len(identifiers) != 1 or not re.fullmatch(
                 r"action_builder:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", identifiers[0])):
             raise QueueError("Reconciliation requires one valid Action Builder person ID and matching details.")
+        pending = entry.get("pending_receipt")
+        if pending and (pending["destination"] != lookup["destination"] or pending["identifiers"] != identifiers):
+            raise QueueError("The verified person must match the saved person receipt and campaign.")
         # Retain a checked decision in the existing history format. This does
         # not record a new approved_send decision or consume a sending attempt.
         self.record_review_lookup(item, lookup)
         entry["decisions"][-1]["reason"] = reason
         entry.update(status="sent", updated_at=_now(), reason=reason,
                      result={"identifiers": list(identifiers)})
+        entry.pop("pending_receipt", None)
         self._review_checks.discard(item.id)
         self._commit()
 
@@ -851,7 +893,10 @@ class RecordQueue:
         self._require_review(entry)
         reason = self._review_reason(reason)
         self._validate_destination(config_destination)
-        if self.review_details(item)["related_sent"]:
+        details = self.review_details(item)
+        if details["related_created"]:
+            raise QueueError("A related record has a confirmed person receipt. Verify that existing person; do not create another.")
+        if details["related_sent"]:
             raise QueueError("A related record was already sent. Do not create this person again.")
         if any(self._require_open()["records"][identifier]["status"] == "sending"
                for identifier in self._related_ids([item.id])):
@@ -921,6 +966,9 @@ class RecordQueue:
         entry = self._entry_for(item)
         if entry["status"] != "sending":
             raise QueueError("Only a claimed record can be marked sent.")
+        pending = entry.get("pending_receipt")
+        if pending and [self._native_person_id(result)] != pending["identifiers"]:
+            raise QueueError("The completed submission must match its saved person receipt.")
         # Retain a receipt, not the API's potentially much larger person record.
         person = result.get("person", {}) if isinstance(result, dict) else {}
         receipt = {}
@@ -931,6 +979,51 @@ class RecordQueue:
             if isinstance(identifiers, list) and all(isinstance(value, str) for value in identifiers):
                 receipt["identifiers"] = identifiers
         entry.update(status="sent", updated_at=_now(), result=receipt)
+        entry.pop("pending_receipt", None)
+        self._commit()
+
+    def record_person_receipt(self, item: QueueItem, receipt: dict, *, destination: dict[str, str]) -> None:
+        """Save the confirmed identity before member verification, never full API data."""
+        self._validate()
+        entry = self._entry_for(item)
+        if entry["status"] != "sending":
+            raise QueueError("Only a claimed submission can save a person receipt.")
+        self._validate_destination(destination)
+        prior = entry.get("lookup")
+        if not prior or prior["destination"] != destination:
+            raise QueueError("The person receipt campaign must match the saved submission lookup.")
+        pending = {"identifiers": [self._native_person_id(receipt)], "destination": dict(destination)}
+        if entry.get("pending_receipt") not in (None, pending):
+            raise QueueError("A different person receipt is already saved for this submission.")
+        entry.update(pending_receipt=pending, updated_at=_now())
+        self._commit()
+
+    def pending_person_receipt(self, item: QueueItem) -> dict[str, Any] | None:
+        """Return a detached identity awaiting member verification, if available."""
+        self._validate()
+        return json.loads(json.dumps(self._entry_for(item).get("pending_receipt")))
+
+    def finish_person_verification(self, item: QueueItem, *, destination: dict[str, str],
+                                   identifiers: list[str], reason: str) -> None:
+        """Complete GET-only verification of the saved person; never claim a new send."""
+        self._validate()
+        entry = self._entry_for(item)
+        if entry["status"] != "uncertain":
+            raise QueueError("Only an uncertain submission can complete saved-person verification.")
+        self._validate_destination(destination)
+        reason = self._review_reason(reason)
+        pending = entry.get("pending_receipt")
+        if not pending or pending["destination"] != destination or pending["identifiers"] != identifiers:
+            raise QueueError("The verified person must match the saved person receipt and campaign.")
+        timestamp = _now()
+        entry.setdefault("decisions", []).append({
+            "action": "checked", "at": timestamp, "reason": reason,
+            "previous_status": "uncertain", "destination": dict(destination),
+        })
+        entry.update(status="sent", updated_at=timestamp, reason=reason,
+                     result={"identifiers": list(identifiers)})
+        entry.pop("pending_receipt")
+        self._review_checks.discard(item.id)
         self._commit()
 
     def mark_uncertain(self, item: QueueItem, reason: str) -> None:

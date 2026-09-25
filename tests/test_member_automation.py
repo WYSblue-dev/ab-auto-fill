@@ -255,7 +255,11 @@ class MemberAutomationTests(unittest.TestCase):
             self.assertEqual(post.call_args.kwargs['json']['person']['action_builder:latest_assessment'],1)
             self.assertEqual(len(post.call_args.kwargs['json']['add_tags']),2)
             with RecordQueue(folder) as queue:
-                self.assertEqual(queue.review_details(queue.review_records()[0])['status'],'uncertain')
+                details = queue.review_details(queue.review_records()[0])
+                self.assertEqual(details['status'], 'uncertain')
+                self.assertEqual(details['pending_receipt'], {'identifiers': [IDENTIFIER], 'destination': CONFIG.destination})
+                self.assertTrue(details['related_created'])
+                self.assertFalse(details['related_sent'])
 
     def test_reconciliation_cannot_hide_missing_member_tags(self):
         with tempfile.TemporaryDirectory() as folder:

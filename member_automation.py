@@ -11,6 +11,7 @@ import time
 
 import requests
 
+from action_builder_http import get_with_retries
 from member_classification import normalize_classification
 
 SECTION = 'Fourth District Workers'
@@ -62,7 +63,7 @@ class MemberAutomationClient:
     def get(self, path, params=None):
         time.sleep(max(0, self.next_request-time.monotonic()))
         try:
-            response = requests.get(self.config.people_url.removesuffix('/people') + path,
+            response = get_with_retries(self.config.people_url.removesuffix('/people') + path,
                                     headers=self.config.headers, params=params, timeout=(5,30), allow_redirects=False)
             if response.status_code != 200:
                 raise MemberAutomationError(f'Member information could not be verified: HTTP {response.status_code}. Keep the record held; do not send it again.')
@@ -111,17 +112,25 @@ class MemberAutomationClient:
             if len(found)!=1 or found[0].get('action_builder:field_type')!='standard':
                 raise MemberAutomationError('A configured classification or residence-local response is missing or ambiguous in the campaign. No new person should be sent until the tags are configured.')
 
-    def verify(self, payload, receipt):
-        if not payload.get('add_tags'):
+    def verify(self, payload, receipt, *, require_person=False):
+        if not payload.get('add_tags') and not require_person:
             return
-        identifiers = receipt.get('person',{}).get('identifiers',[])
-        native = [value for value in identifiers if isinstance(value,str) and re.fullmatch(r'action_builder:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}',value)]
-        if len(native)!=1:
-            raise MemberAutomationError('Cannot verify member tags without one confirmed person ID.')
+        receipt_person = receipt.get('person') if isinstance(receipt, dict) else None
+        identifiers = receipt_person.get('identifiers') if isinstance(receipt_person, dict) else None
+        if not isinstance(identifiers, list) or any(not isinstance(value, str) or not value for value in identifiers):
+            raise MemberAutomationError('Cannot verify the person without one confirmed person ID.')
+        native = [value for value in identifiers if value.startswith('action_builder:')]
+        if len(native)!=1 or not re.fullmatch(r'action_builder:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}',native[0]):
+            raise MemberAutomationError('Cannot verify the person without one confirmed person ID.')
         person_path = '/people/' + native[0].partition(':')[2]
         person = self.get(person_path)
-        if not isinstance(person.get('identifiers'),list) or person['identifiers'].count(native[0]) != 1:
+        person_identifiers = person.get('identifiers')
+        if (not isinstance(person_identifiers, list)
+                or any(not isinstance(value, str) or not value for value in person_identifiers)
+                or [value for value in person_identifiers if value.startswith('action_builder:')] != native):
             raise MemberAutomationError('The person lookup did not return the confirmed person ID. Keep the record held; do not create another person.')
+        if not payload.get('add_tags'):
+            return
         assessment = person.get('action_builder:latest_assessment')
         if type(assessment) is not int or assessment != 1:
             if assessment is None:

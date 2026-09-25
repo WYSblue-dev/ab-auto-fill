@@ -58,7 +58,7 @@ class LocalAppTests(unittest.TestCase):
     def review_data(self, item):
         return {'id': item.id, 'confirmed': True, 'checked': True, 'reason': 'Verified this is a separate person.'}
 
-    def uncertain_member(self, *, address_line_1=None, family='sample'):
+    def uncertain_member(self, *, address_line_1=None, family='sample', saved_receipt=False):
         self.app.settings.save({**self.data, 'residence_local': '1105'})
         self.config = self.app.settings.config()
         person = {**RECORD, 'classification': 'CE/CW'}
@@ -68,6 +68,8 @@ class LocalAppTests(unittest.TestCase):
         with RecordQueue(self.app.queue_dir) as queue:
             queue.record_lookup(item, CLEAR.as_history(self.config))
             queue.begin_send(item)
+            if saved_receipt:
+                queue.record_person_receipt(item, SUCCESS, destination=self.config.destination)
             queue.mark_uncertain(item, 'Earlier sending attempt was not confirmed.')
         self.lookup.return_value = EXISTING
         data = {**self.review_data(item), 'destination': self.config.destination, 'residence_local': '1105'}
@@ -274,6 +276,31 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(row['reason'], 'Sending stopped: ' + message)
         self.post.assert_called_once()
 
+    def test_person_receipt_is_durable_before_member_verification_failure(self):
+        self.app.settings.save({**self.data, 'residence_local': '1105'})
+        self.config = self.app.settings.config()
+        item = self.seed(person={**RECORD, 'classification': 'CE/CW'})
+
+        def created_but_unverified(payload, *, config, on_person_receipt, **options):
+            on_person_receipt(SUCCESS)
+            raise local_app.MemberAutomationError('Member information could not be verified: HTTP 503.')
+
+        self.post.side_effect = created_but_unverified
+        with patch.object(local_app.MemberAutomationClient, 'preflight'):
+            with self.assertRaises(local_app.MemberAutomationError):
+                self.app.perform('send', {**self.batch_data(), 'residence_local': '1105'})
+        reopened = local_app.Application(self.root, self.app.queue_dir)
+        row = reopened.state()['records'][0]
+        self.assertEqual(row['id'], item.id)
+        self.assertEqual(row['status'], 'uncertain')
+        self.assertEqual(row['pending_receipt'], {'identifiers': SUCCESS['person']['identifiers'],
+                                                 'destination': self.config.destination})
+        self.assertTrue(row['related_created'])
+        self.assertIn('Person created; verification could not complete', row['reason'])
+        self.assertNotIn('tag failed', row['reason'])
+        self.app.perform('send', {**self.batch_data(), 'residence_local': '1105'})
+        self.post.assert_called_once()
+
     def test_review_requires_displayed_fresh_check_and_explicit_acknowledgment(self):
         item = self.seed(held=True)
         data = self.review_data(item)
@@ -355,6 +382,108 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(row['status'], 'sent')
         self.assertEqual(row['lookup']['outcome'], 'existing')
         self.assertEqual(row['result']['identifiers'], EXISTING.candidates[0]['identifiers'])
+
+    def test_saved_person_receipt_verifies_by_id_without_contact_search_or_post(self):
+        item, data = self.uncertain_member(address_line_1='123 Unstandardized Street', saved_receipt=True)
+        original_lookup = self.app.state()['records'][0]['lookup']
+        self.lookup.side_effect = AssertionError('A saved person receipt must not trigger contact searches.')
+        with patch.object(requests, 'get', side_effect=self.member_verification_responses()) as get:
+            self.app.perform('review-reconcile', data)
+        self.assertEqual(get.call_count, 2)
+        person_id = SUCCESS['person']['identifiers'][0].partition(':')[2]
+        self.assertTrue(get.call_args_list[0].args[0].endswith('/people/' + person_id))
+        self.assertTrue(get.call_args_list[1].args[0].endswith('/people/' + person_id + '/taggings'))
+        self.lookup.assert_not_called()
+        self.post.assert_not_called()
+        reopened = local_app.Application(self.root, self.app.queue_dir)
+        row = reopened.state()['records'][0]
+        self.assertEqual(row['id'], item.id)
+        self.assertEqual(row['status'], 'sent')
+        self.assertEqual(row['result']['identifiers'], SUCCESS['person']['identifiers'])
+        self.assertFalse(row.get('pending_receipt'))
+        self.assertEqual(row['lookup'], original_lookup)
+        with self.assertRaisesRegex(ValueError, 'no longer available'):
+            self.app.perform('review-reconcile', data)
+
+    def test_saved_receipt_contact_only_verification_still_checks_person_id(self):
+        item = self.seed()
+        with RecordQueue(self.app.queue_dir) as queue:
+            queue.record_lookup(item, CLEAR.as_history(self.config))
+            queue.begin_send(item)
+            queue.record_person_receipt(item, SUCCESS, destination=self.config.destination)
+            queue.mark_uncertain(item, 'Interrupted before verification finished.')
+        data = {**self.review_data(item), 'destination': self.config.destination}
+        with patch.object(requests, 'get', return_value=self.member_verification_responses()[0]) as get:
+            self.app.perform('review-reconcile', data)
+        get.assert_called_once()
+        self.lookup.assert_not_called()
+        self.post.assert_not_called()
+        self.assertEqual(self.app.state()['records'][0]['status'], 'sent')
+
+    def test_saved_person_receipt_survives_read_error_without_private_details(self):
+        _, data = self.uncertain_member(saved_receipt=True)
+        original = self.app.state()['records'][0]['pending_receipt']
+        with patch.object(requests, 'get', side_effect=requests.Timeout('private-token and private-address')):
+            with self.assertRaises(local_app.MemberAutomationError):
+                self.app.perform('review-reconcile', data)
+        reopened = local_app.Application(self.root, self.app.queue_dir)
+        row = reopened.state()['records'][0]
+        self.assertEqual(row['status'], 'uncertain')
+        self.assertEqual(row['pending_receipt'], original)
+        self.assertTrue(row['related_created'])
+        self.assertIn('Verification stopped', row['reason'])
+        self.assertNotIn('private-', row['reason'])
+        self.lookup.assert_not_called()
+        self.post.assert_not_called()
+
+    def test_saved_person_receipt_rejects_wrong_returned_person_id(self):
+        _, data = self.uncertain_member(saved_receipt=True)
+        document = {'identifiers': ['action_builder:22222222-2222-4222-8222-222222222222'],
+                    'action_builder:latest_assessment': 1}
+        with patch.object(requests, 'get', return_value=response(document)) as get:
+            with self.assertRaises(local_app.MemberAutomationError):
+                self.app.perform('review-reconcile', data)
+        get.assert_called_once()
+        row = self.app.state()['records'][0]
+        self.assertEqual(row['status'], 'uncertain')
+        self.assertEqual(row['pending_receipt']['identifiers'], SUCCESS['person']['identifiers'])
+        self.lookup.assert_not_called()
+        self.post.assert_not_called()
+
+    def test_saved_person_receipt_requires_confirmed_original_campaign_and_settings(self):
+        _, data = self.uncertain_member(saved_receipt=True)
+        for changed in ({'checked': False}, {'confirmed': False}, {'residence_local': '999'},
+                        {'destination': {**self.config.destination, 'campaign_id': 'another'}}):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                self.app.perform('review-reconcile', {**data, **changed})
+        self.app.settings.save({**self.data, 'campaign_id': 'another', 'residence_local': '1105'})
+        with self.assertRaisesRegex(ValueError, 'saved person receipt'):
+            self.app.perform('review-reconcile', {**data, 'destination': self.app.settings.config().destination})
+        row = self.app.state()['records'][0]
+        self.assertEqual(row['status'], 'uncertain')
+        self.assertEqual(row['pending_receipt']['destination'], self.config.destination)
+        self.lookup.assert_not_called()
+        self.post.assert_not_called()
+
+    def test_saved_person_receipt_blocks_another_new_person_submission(self):
+        item, _ = self.uncertain_member(saved_receipt=True)
+        self.app.perform('review-check', {'id': item.id})
+        self.lookup.reset_mock()
+        with self.assertRaisesRegex(ValueError, 'already created'):
+            self.app.perform('review-send', self.review_data(item))
+        self.lookup.assert_not_called()
+        self.post.assert_not_called()
+
+    def test_saved_person_receipt_blocks_edit_without_losing_verification_record(self):
+        item, _ = self.uncertain_member(saved_receipt=True)
+        original = self.app.state()['records'][0]
+        with self.assertRaisesRegex(ValueError, 'Verify the created person before editing'):
+            self.app.perform('review-edit', {'id': item.id,
+                'person': {**original['person'], 'address_line_1': '456 Corrected Street'}})
+        reopened = local_app.Application(self.root, self.app.queue_dir)
+        self.assertEqual(reopened.state()['records'], [original])
+        self.lookup.assert_not_called()
+        self.post.assert_not_called()
 
     def test_real_lookup_reconciles_suffix_difference_and_verifies_member_details(self):
         item, data = self.uncertain_member(address_line_1='123 Sample Street')

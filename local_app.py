@@ -271,11 +271,15 @@ class Application:
     def _post(self, queue, item, payload, config):
         try:
             options = {'member_preflight': True} if payload.get('add_tags') else {}
-            receipt = submit_to_actionbuilder(payload, config=config, **options)
+            receipt = submit_to_actionbuilder(payload, config=config,
+                on_person_receipt=lambda receipt: queue.record_person_receipt(item, receipt, destination=config.destination),
+                **options)
             queue.finish_send(item, receipt)
         except BaseException as error:
             try:
-                queue.mark_uncertain(item, 'Sending stopped: ' + safe_error(error))
+                prefix = ('Person created; verification could not complete: '
+                          if queue.pending_person_receipt(item) else 'Sending stopped: ')
+                queue.mark_uncertain(item, prefix + safe_error(error))
             except (OSError, QueueError):
                 pass
             raise
@@ -383,7 +387,10 @@ class Application:
             item = next((item for item in queue.review_records() if item.id == data.get('id')), None)
             if item is None:
                 raise ValueError('This record is no longer available for review. Refresh the list.')
+            details = queue.review_details(item)
             if action == 'review-edit':
+                if details.get('related_created'):
+                    raise ValueError('Action Builder already returned a person receipt. Verify the created person before editing this import.')
                 queue.save_review_edit(item, normalize_review_record(data.get('person')))
                 self.approvals.clear()
                 return 'Corrected details saved. Run a fresh check before approving a submission.'
@@ -391,7 +398,6 @@ class Application:
                 queue.discard_review(item, data.get('reason', ''))
                 self.approvals.pop(item.id, None)
                 return 'Import discarded. Its history is retained to prevent reimporting it.'
-            details = queue.review_details(item)
             if action == 'review-reconcile':
                 try:
                     if details['status'] != 'uncertain':
@@ -403,19 +409,28 @@ class Application:
                         raise ValueError('The destination changed. Review the current campaign before reconciling.')
                     if data.get('residence_local', '') != config.residence_local:
                         raise ValueError('The residence local changed. Review the current member settings before reconciling.')
-                    prior = details.get('lookup')
+                    saved_receipt = queue.pending_person_receipt(item)
+                    prior = saved_receipt or details.get('lookup')
                     if not prior or prior['destination'] != config.destination:
-                        raise ValueError('The verification campaign must match the saved submission lookup. Restore that campaign in Settings before reconciling.')
+                        evidence = 'person receipt' if saved_receipt else 'submission lookup'
+                        raise ValueError(f'The verification campaign must match the saved {evidence}. Restore that campaign in Settings before reconciling.')
                     payload = prepare_member_payload(build_actionbuilder_payload(load_approved_person(item.path)), config)
-                    result = ActionBuilderLookup(config).check(payload)
-                    # Check the prior destination above before replacing lookup evidence.
-                    # Failed reconciliation must still show the newly found candidates.
-                    queue.record_review_lookup(item, result.as_history(config))
-                    if result.outcome != 'existing':
-                        raise ValueError('Reconciliation requires one exact matching person. Review the latest matching and differing fields below; keep this record held.')
-                    MemberAutomationClient(config).verify(payload, {'person':{'identifiers':result.candidates[0]['identifiers']}})
-                    queue.reconcile_sent(item, lookup=result.as_history(config),
-                                         reason='Earlier submission verified by the operator and fresh exact email and phone matches; reconciled without sending again.')
+                    if saved_receipt:
+                        MemberAutomationClient(config).verify(payload,
+                            {'person': {'identifiers': saved_receipt['identifiers']}}, require_person=True)
+                        queue.finish_person_verification(item, destination=config.destination,
+                            identifiers=saved_receipt['identifiers'],
+                            reason='Verified the saved Action Builder person ID and configured member details without sending again.')
+                    else:
+                        result = ActionBuilderLookup(config).check(payload)
+                        # Check the prior destination above before replacing lookup evidence.
+                        # Failed reconciliation must still show the newly found candidates.
+                        queue.record_review_lookup(item, result.as_history(config))
+                        if result.outcome != 'existing':
+                            raise ValueError('Reconciliation requires one exact matching person. Review the latest matching and differing fields below; keep this record held.')
+                        MemberAutomationClient(config).verify(payload, {'person':{'identifiers':result.candidates[0]['identifiers']}})
+                        queue.reconcile_sent(item, lookup=result.as_history(config),
+                                             reason='Earlier submission verified by the operator and fresh exact email and phone matches; reconciled without sending again.')
                 except Exception as error:
                     if details['status'] == 'uncertain':
                         try:
@@ -436,6 +451,8 @@ class Application:
                     raise ValueError('Confirm that you checked the existing records before creating a person.')
                 if details['related_sent']:
                     raise ValueError('A related record was already sent. This person cannot be sent again.')
+                if details.get('related_created'):
+                    raise ValueError('A person was already created for this record. Verify the existing person instead of creating another one.')
                 reason = data.get('reason', '')
                 if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
                     raise ValueError('Enter an approval reason of 1–500 characters.')

@@ -30,6 +30,8 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
+from action_builder_http import get_with_retries
+
 
 class LookupError(RuntimeError):
     """The search was incomplete; this is different from finding no match."""
@@ -321,7 +323,7 @@ class ActionBuilderLookup:
             time.sleep(delay)
         try:
             # Requests encodes the filter. Never put personal data in log output.
-            response = requests.get(
+            response = get_with_retries(
                 self.config.people_url,
                 headers=self.config.headers,
                 params={"filter": expression, "page": page},

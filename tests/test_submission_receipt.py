@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+import requests
+
 from action_builder_lookup import ActionBuilderConfig, LookupError, LookupResult
 from record_queue import RecordQueue, STATE_NAME
 import send_person
@@ -16,6 +18,7 @@ from send_person import submit_to_actionbuilder
 from test_send_queue import RECORD
 from test_lookup_queue import EXISTING, AMBIGUOUS
 from test_action_builder_lookup import collection, response
+from member_automation import MemberAutomationClient, MemberAutomationError
 
 
 CONFIG = ActionBuilderConfig("invented-token", "invented", "invented-campaign")
@@ -23,6 +26,86 @@ PERSON_ID = "action_builder:11111111-1111-4111-8111-111111111111"
 
 
 class SubmissionReceiptTests(unittest.TestCase):
+    def test_lost_or_non_json_response_recovers_with_one_post_and_saves_identity_first(self):
+        broken = Mock(status_code=201)
+        broken.json.side_effect = requests.exceptions.JSONDecodeError('invalid', '', 0)
+        for outcome in (requests.ReadTimeout('private URL'), requests.ConnectionError('private token'), broken):
+            with self.subTest(outcome=type(outcome).__name__):
+                events = []
+                with (patch('send_person.requests.post', side_effect=outcome if isinstance(outcome, Exception) else None,
+                            return_value=outcome) as post,
+                      patch.object(send_person.ActionBuilderLookup, 'check', return_value=EXISTING) as lookup,
+                      patch.object(MemberAutomationClient, 'verify', side_effect=lambda *args: events.append('verify')),
+                      patch('send_person.time.sleep')):
+                    receipt = submit_to_actionbuilder(
+                        send_person.build_actionbuilder_payload(RECORD), config=CONFIG,
+                        on_person_receipt=lambda result: events.append(('save', result['person']['identifiers'])))
+                post.assert_called_once()
+                lookup.assert_called_once()
+                self.assertEqual(events, [('save', EXISTING.candidates[0]['identifiers']), 'verify'])
+                self.assertTrue(receipt['confirmed_by_lookup'])
+
+    def test_uncertain_response_cannot_complete_without_exact_read_only_proof(self):
+        for result in (LookupResult('not_found', 'No match'), AMBIGUOUS, LookupError('Search incomplete')):
+            with self.subTest(result=type(result).__name__):
+                saved = Mock()
+                with (patch('send_person.requests.post', side_effect=requests.Timeout('private token')) as post,
+                      patch.object(send_person.ActionBuilderLookup, 'check',
+                                   side_effect=result if isinstance(result, Exception) else None, return_value=result),
+                      patch.object(MemberAutomationClient, 'verify') as verify,
+                      patch('send_person.time.sleep')):
+                    with self.assertRaises(send_person.SubmissionReceiptError) as caught:
+                        submit_to_actionbuilder(send_person.build_actionbuilder_payload(RECORD), config=CONFIG,
+                                                on_person_receipt=saved)
+                self.assertNotIn('private token', str(caught.exception))
+                post.assert_called_once()
+                saved.assert_not_called()
+                verify.assert_not_called()
+
+    def test_valid_receipt_is_saved_before_member_read_failure_and_never_reposted(self):
+        receipt = {'person': {'identifiers': [PERSON_ID]}}
+        saved = Mock()
+        with (patch('send_person.requests.post', return_value=response(receipt, status=201)) as post,
+              patch.object(MemberAutomationClient, 'verify', side_effect=MemberAutomationError('HTTP 503')),
+              patch.object(send_person.ActionBuilderLookup, 'check') as lookup):
+            with self.assertRaises(MemberAutomationError):
+                submit_to_actionbuilder(send_person.build_actionbuilder_payload(RECORD), config=CONFIG,
+                                        on_person_receipt=saved)
+        saved.assert_called_once_with(receipt)
+        post.assert_called_once()
+        lookup.assert_not_called()
+
+    def test_receipt_storage_failure_stops_before_verification(self):
+        saved = Mock(side_effect=OSError('disk unavailable'))
+        with (patch('send_person.requests.post', return_value=response({'person': {'identifiers': [PERSON_ID]}})) as post,
+              patch.object(MemberAutomationClient, 'verify') as verify,
+              patch.object(send_person.ActionBuilderLookup, 'check') as lookup):
+            with self.assertRaises(OSError):
+                submit_to_actionbuilder(send_person.build_actionbuilder_payload(RECORD), config=CONFIG,
+                                        on_person_receipt=saved)
+        post.assert_called_once()
+        saved.assert_called_once()
+        verify.assert_not_called()
+        lookup.assert_not_called()
+
+    def test_http_rejections_redirects_and_certificate_errors_do_not_run_recovery(self):
+        for status in (301, 401, 403, 429, 503):
+            rejected = response({}, status=status)
+            if status >= 400:
+                rejected.raise_for_status.side_effect = requests.HTTPError('rejected')
+            with self.subTest(status=status), patch('send_person.requests.post', return_value=rejected) as post, \
+                    patch.object(send_person.ActionBuilderLookup, 'check') as lookup:
+                with self.assertRaises((send_person.SubmissionReceiptError, requests.HTTPError)):
+                    submit_to_actionbuilder(send_person.build_actionbuilder_payload(RECORD), config=CONFIG)
+                post.assert_called_once()
+                lookup.assert_not_called()
+        with (patch('send_person.requests.post', side_effect=requests.exceptions.SSLError('certificate')) as post,
+              patch.object(send_person.ActionBuilderLookup, 'check') as lookup):
+            with self.assertRaises(requests.exceptions.SSLError):
+                submit_to_actionbuilder(send_person.build_actionbuilder_payload(RECORD), config=CONFIG)
+            post.assert_called_once()
+            lookup.assert_not_called()
+
     def member_batch_with_remote_street(self, local_street, remote_street):
         """Run real lookup/submission/member verification against an invented API."""
         config = ActionBuilderConfig('invented-token', 'invented', 'invented-campaign', '1105')

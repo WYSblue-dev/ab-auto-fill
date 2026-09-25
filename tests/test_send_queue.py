@@ -221,9 +221,17 @@ class QueuedSenderTests(unittest.TestCase):
             original_begin_send(queue, item)
             events.append("claimed")
 
-        def post(payload, *, config):
+        def post(payload, *, config, on_person_receipt=None):
             self.assertEqual(events[-1], "claimed")
             events.append("posted")
+            self.assertIsNotNone(on_person_receipt)
+            on_person_receipt(SUCCESS)
+            state = json.loads((self.queue_dir / ".queue-state.json").read_text())
+            claimed = [entry for entry in state["records"].values() if entry["status"] == "sending"]
+            self.assertEqual(len(claimed), 1)
+            self.assertEqual(claimed[0]["pending_receipt"], {
+                "identifiers": SUCCESS["person"]["identifiers"], "destination": CONFIG.destination})
+            self.assertNotIn("result", claimed[0])
             return SUCCESS
 
         with patch.object(RecordQueue, "begin_send", autospec=True, side_effect=claim):
@@ -239,8 +247,10 @@ class QueuedSenderTests(unittest.TestCase):
         def pause(seconds):
             events.append(("sleep", seconds))
 
-        def post(payload, *, config):
+        def post(payload, *, config, on_person_receipt=None):
             events.append(("post",))
+            self.assertIsNotNone(on_person_receipt)
+            on_person_receipt(SUCCESS)
             return SUCCESS
 
         status, submit, _, errors = self.run_sender(sleep_effect=pause)
@@ -253,6 +263,29 @@ class QueuedSenderTests(unittest.TestCase):
         self.assertEqual(submit.call_count, 2)
         self.assertEqual(events, [("sleep", 0.3), ("post",), ("sleep", 0.3),
                                   ("sleep", 0.3), ("post",)])
+
+    def test_receipt_callback_failure_stops_batch_without_completing_claimed_record(self):
+        self.seed_queue([RECORD, OTHER_RECORD])
+        verified = []
+
+        def post(payload, *, config, on_person_receipt=None):
+            on_person_receipt(SUCCESS)
+            verified.append(True)
+            return SUCCESS
+
+        with patch.object(RecordQueue, "record_person_receipt", side_effect=OSError("Invented disk failure.")) as save:
+            status, submit, _, _ = self.run_sender("--submit", submit_effect=post)
+        self.assertEqual(status, 1)
+        submit.assert_called_once()
+        save.assert_called_once()
+        self.assertEqual(verified, [])
+        with RecordQueue(self.queue_dir) as queue:
+            self.assertEqual(len(queue.pending_records()), 1)
+            held = queue.review_records()
+            self.assertEqual(len(held), 1)
+            self.assertEqual(queue.review_details(held[0])["status"], "uncertain")
+            self.assertFalse(queue.review_details(held[0])["related_sent"])
+            self.assertIsNone(queue.pending_person_receipt(held[0]))
 
     def test_submission_failure_stops_batch_and_blocks_that_record(self):
         self.seed_queue([RECORD, OTHER_RECORD])

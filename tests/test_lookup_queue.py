@@ -122,10 +122,12 @@ class LookupQueueTests(unittest.TestCase):
             real_claim(queue, item)
             events.append("claim")
 
-        def post(payload, *, config):
+        def post(payload, *, config, on_person_receipt=None):
             self.assertEqual(events[-1], "claim")
             self.assertIs(config, CONFIG)
             events.append("post")
+            self.assertIsNotNone(on_person_receipt)
+            on_person_receipt(sender_fixture.SUCCESS)
             return sender_fixture.SUCCESS
 
         with patch.object(RecordQueue, "begin_send", autospec=True, side_effect=claim):

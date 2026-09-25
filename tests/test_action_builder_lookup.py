@@ -355,12 +355,13 @@ class LookupTests(unittest.TestCase):
         for failure in failures:
             with self.subTest(failure=repr(failure)):
                 self.get.reset_mock()
-                self.get.side_effect = [response(collection()), failure]
+                attempts = 3 if isinstance(failure, requests.Timeout) else 1
+                self.get.side_effect = [response(collection()), *([failure] * attempts)]
                 with self.assertRaises(lookup.LookupError):
                     self.client.check(self.person)
                 self.assertEqual([call.kwargs["params"]["filter"] for call in self.get.call_args_list], [
                     "email_address eq 'morgan@example.test'",
-                    "phone_number eq '12025550123'",
+                    *(["phone_number eq '12025550123'"] * attempts),
                 ])
 
     def test_candidate_changing_during_independent_searches_fails(self):

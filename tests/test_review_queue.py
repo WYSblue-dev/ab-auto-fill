@@ -9,6 +9,11 @@ from unittest.mock import patch
 
 from record_queue import QueueError, RecordQueue, STATE_NAME
 from test_send_queue import CONFIG, CLEAR, RECORD, SUCCESS
+from action_builder_lookup import LookupResult
+
+
+PERSON_ID = SUCCESS["person"]["identifiers"][0]
+OTHER_PERSON_ID = "action_builder:22222222-2222-4222-8222-222222222222"
 
 
 class ReviewQueueTests(unittest.TestCase):
@@ -55,7 +60,7 @@ class ReviewQueueTests(unittest.TestCase):
             queue.discard_review(item, "Repeated confirmation.")
         state = self.state()
         entry = state["records"][item.id]
-        self.assertEqual(state["version"], 3)
+        self.assertEqual(state["version"], 4)
         self.assertEqual(entry["status"], "discarded")
         self.assertEqual(len(entry["decisions"]), 1)
         self.assertEqual(entry["decisions"][0]["action"], "discarded")
@@ -374,7 +379,288 @@ class ReviewQueueTests(unittest.TestCase):
         (self.directory / STATE_NAME).write_text(json.dumps(state))
         with RecordQueue(self.directory) as queue:
             self.assertEqual([entry.id for entry in queue.review_records()], [item.id])
-        self.assertEqual(self.state()["version"], 3)
+        self.assertEqual(self.state()["version"], 4)
+
+    def claimed_with_receipt(self, queue):
+        queue.enqueue("first", RECORD, {"first-source"}, ["first.pdf"])
+        item = queue.pending_records()[0]
+        queue.record_lookup(item, CLEAR.as_history(CONFIG))
+        queue.begin_send(item)
+        queue.record_person_receipt(item, SUCCESS, destination=CONFIG.destination)
+        return item
+
+    def test_person_receipt_is_durable_detached_and_not_completed_or_private_response_data(self):
+        with RecordQueue(self.directory) as queue:
+            item = self.held(queue)
+            self.approve(queue, item)
+            receipt = {"person": {"identifiers": [PERSON_ID, "custom:private-response-value"],
+                                  "browser_url": "https://example.test/private-response-value",
+                                  "email": "private-response-value@example.test"},
+                       "unexpected": "private-response-value"}
+            destination = CONFIG.destination
+            queue.record_person_receipt(item, receipt, destination=destination)
+            destination["campaign_id"] = "mutated"
+            receipt["person"]["identifiers"][0] = OTHER_PERSON_ID
+            saved = queue.pending_person_receipt(item)
+            self.assertEqual(saved, {"identifiers": [PERSON_ID], "destination": CONFIG.destination})
+            saved["identifiers"][0] = OTHER_PERSON_ID
+            saved["destination"]["campaign_id"] = "mutated"
+            details = queue.review_details(item)
+            self.assertEqual(details["status"], "sending")
+            self.assertTrue(details["related_created"])
+            self.assertFalse(details["related_sent"])
+            self.assertEqual(details["pending_receipt"]["identifiers"], [PERSON_ID])
+            stored = self.state()["records"][item.id]
+            self.assertNotIn("result", stored)
+            self.assertNotIn("private-response-value", json.dumps(stored))
+            self.assertNotIn(CONFIG.api_key, json.dumps(stored))
+        # A process stopping immediately after the receipt save cannot re-send it.
+        with RecordQueue(self.directory) as queue:
+            item = queue.review_records()[0]
+            self.assertEqual(queue.review_details(item)["status"], "uncertain")
+            self.assertEqual(queue.pending_person_receipt(item),
+                             {"identifiers": [PERSON_ID], "destination": CONFIG.destination})
+            self.assertEqual(queue.pending_records(), [])
+
+    def test_receipt_save_requires_claim_matching_saved_destination_and_valid_single_native_id(self):
+        with RecordQueue(self.directory) as queue:
+            queue.enqueue("first", RECORD, {"source"}, ["first.pdf"])
+            item = queue.pending_records()[0]
+            with self.assertRaisesRegex(QueueError, "claimed"):
+                queue.record_person_receipt(item, SUCCESS, destination=CONFIG.destination)
+            queue.begin_send(item)
+            before = self.state()
+            with self.assertRaisesRegex(QueueError, "saved submission lookup"):
+                queue.record_person_receipt(item, SUCCESS, destination=CONFIG.destination)
+            self.assertEqual(self.state(), before)
+        self.directory = Path(self.temporary.name) / "validated"
+        with RecordQueue(self.directory) as queue:
+            item = self.claimed_with_receipt(queue)
+            before = self.state()
+            for identifiers in ([], ["custom:no-native-id"], ["action_builder:invalid"],
+                                [PERSON_ID, OTHER_PERSON_ID], [None], [OTHER_PERSON_ID]):
+                with self.subTest(identifiers=identifiers), self.assertRaises(QueueError):
+                    queue.record_person_receipt(item, {"person": {"identifiers": identifiers}},
+                                                destination=CONFIG.destination)
+                self.assertEqual(self.state(), before)
+            with self.assertRaisesRegex(QueueError, "API error"):
+                queue.record_person_receipt(item, {**SUCCESS, "errors": []}, destination=CONFIG.destination)
+            for key in ("subdomain", "campaign_id"):
+                with self.subTest(key=key), self.assertRaisesRegex(QueueError, "saved submission lookup"):
+                    queue.record_person_receipt(item, SUCCESS, destination={**CONFIG.destination, key: "other"})
+                self.assertEqual(self.state(), before)
+
+    def test_known_person_verification_requires_same_id_destination_and_uncertain_status(self):
+        with RecordQueue(self.directory) as queue:
+            item = self.claimed_with_receipt(queue)
+            with self.assertRaisesRegex(QueueError, "uncertain"):
+                queue.finish_person_verification(item, destination=CONFIG.destination,
+                                                 identifiers=[PERSON_ID], reason="Verified member details.")
+            queue.mark_uncertain(item, "Member checks did not finish.")
+        with RecordQueue(self.directory) as queue:
+            item = queue.review_records()[0]
+            before = self.state()
+            for destination, identifiers in (({**CONFIG.destination, "campaign_id": "other"}, [PERSON_ID]),
+                                             (CONFIG.destination, [OTHER_PERSON_ID]),
+                                             (CONFIG.destination, [PERSON_ID, PERSON_ID])):
+                with self.subTest(destination=destination, identifiers=identifiers), self.assertRaisesRegex(QueueError, "saved person receipt"):
+                    queue.finish_person_verification(item, destination=destination,
+                                                     identifiers=identifiers, reason="Verified member details.")
+                self.assertEqual(self.state(), before)
+            # The pre-send lookup was not_found; completing a known ID needs no new lookup.
+            self.assertEqual(queue.review_details(item)["lookup"]["outcome"], "not_found")
+            queue.finish_person_verification(item, destination=CONFIG.destination,
+                                             identifiers=[PERSON_ID], reason="Verified both tags and assessment.")
+            self.assertIsNone(queue.pending_person_receipt(item))
+            self.assertEqual(queue.review_details(item)["status"], "sent")
+            self.assertEqual(self.state()["records"][item.id]["result"], {"identifiers": [PERSON_ID]})
+            self.assertEqual(self.state()["records"][item.id]["decisions"][-1]["action"], "checked")
+        with RecordQueue(self.directory) as queue:
+            self.assertEqual(queue.review_records(), [])
+            self.assertEqual(queue.pending_records(), [])
+            self.assertEqual(queue.status_for("first"), "sent")
+
+    def test_finish_send_rejects_other_id_without_losing_pending_receipt(self):
+        with RecordQueue(self.directory) as queue:
+            item = self.claimed_with_receipt(queue)
+            before = self.state()
+            with self.assertRaisesRegex(QueueError, "saved person receipt"):
+                queue.finish_send(item, {"person": {"identifiers": [OTHER_PERSON_ID]}})
+            self.assertEqual(self.state(), before)
+            queue.finish_send(item, SUCCESS)
+            self.assertIsNone(queue.pending_person_receipt(item))
+            self.assertEqual(queue.review_details(item)["status"], "sent")
+
+    def test_receipt_persisted_before_interrupted_bookkeeping_survives_reopen(self):
+        with RecordQueue(self.directory) as queue:
+            item = self.held(queue)
+            self.approve(queue, item)
+
+            original_reconcile = queue._reconcile_records
+
+            def interrupt_after_save(*args, **kwargs):
+                stored = self.state()["records"][item.id]
+                if "pending_receipt" not in stored:
+                    return original_reconcile(*args, **kwargs)
+                self.assertEqual(stored["status"], "sending")
+                self.assertEqual(stored["pending_receipt"]["identifiers"], [PERSON_ID])
+                self.assertNotIn("result", stored)
+                raise OSError("Invented interruption after receipt was saved.")
+
+            with patch.object(queue, "_reconcile_records", side_effect=interrupt_after_save):
+                with self.assertRaises(OSError):
+                    queue.record_person_receipt(item, SUCCESS, destination=CONFIG.destination)
+            with self.assertRaisesRegex(QueueError, "Close and reopen"):
+                queue.finish_send(item, SUCCESS)
+        with RecordQueue(self.directory) as queue:
+            item = queue.review_records()[0]
+            self.assertEqual(queue.pending_person_receipt(item)["identifiers"], [PERSON_ID])
+            self.assertEqual(queue.review_details(item)["status"], "uncertain")
+            self.assertFalse(queue.review_details(item)["related_sent"])
+            self.assertEqual(queue.pending_records(), [])
+
+    def test_failed_receipt_write_never_invents_durable_creation_evidence(self):
+        with RecordQueue(self.directory) as queue:
+            item = self.held(queue)
+            self.approve(queue, item)
+            with patch.object(queue, "_write_json", side_effect=OSError("Invented disk failure.")):
+                with self.assertRaises(OSError):
+                    queue.record_person_receipt(item, SUCCESS, destination=CONFIG.destination)
+            self.assertNotIn("pending_receipt", self.state()["records"][item.id])
+            with self.assertRaisesRegex(QueueError, "Close and reopen"):
+                queue.pending_person_receipt(item)
+        with RecordQueue(self.directory) as queue:
+            item = queue.review_records()[0]
+            self.assertIsNone(queue.pending_person_receipt(item))
+            self.assertEqual(queue.review_details(item)["status"], "uncertain")
+            self.assertEqual(queue.pending_records(), [])
+
+    def test_completed_known_person_verification_survives_interrupted_move(self):
+        with RecordQueue(self.directory) as queue:
+            item = self.claimed_with_receipt(queue)
+            queue.mark_uncertain(item, "Member verification stopped.")
+            with patch.object(queue, "_move_record", side_effect=OSError("Invented move interruption.")):
+                with self.assertRaises(OSError):
+                    queue.finish_person_verification(item, destination=CONFIG.destination,
+                                                     identifiers=[PERSON_ID], reason="Verified both tags and assessment.")
+            stored = self.state()["records"][item.id]
+            self.assertEqual(stored["status"], "sent")
+            self.assertNotIn("pending_receipt", stored)
+            self.assertEqual(stored["result"]["identifiers"], [PERSON_ID])
+        with RecordQueue(self.directory) as queue:
+            self.assertEqual(queue.status_for("first"), "sent")
+            self.assertEqual(queue.review_records(), [])
+            self.assertTrue((self.directory / "sent" / item.path.name).is_file())
+
+    def test_pending_receipt_blocks_another_manual_create_after_discard_or_reimport(self):
+        for action in ("same", "discard"):
+            with self.subTest(action=action):
+                self.directory = Path(self.temporary.name) / action
+                with RecordQueue(self.directory) as queue:
+                    item = self.claimed_with_receipt(queue)
+                    queue.mark_uncertain(item, "Member verification stopped.")
+                    original_id = item.id
+                    changed = {**RECORD, "phone": "12025550199"}
+                    if action == "discard":
+                        queue.enqueue("first", changed, {"changed"}, ["changed.pdf"])
+                        queue.discard_review(item, "Remove obsolete paperwork, retain the receipt.")
+                        item = queue.review_records()[0]
+                    self.assertTrue(queue.review_details(item)["related_created"])
+                    self.assertFalse(queue.review_details(item)["related_sent"])
+                    queue.record_review_lookup(item, CLEAR.as_history(CONFIG))
+                    with self.assertRaisesRegex(QueueError, "confirmed person receipt"):
+                        queue.begin_review_send(item, config_destination=CONFIG.destination, reason="Checked.")
+                with RecordQueue(self.directory) as queue:
+                    item = queue.review_records()[0]
+                    self.assertTrue(queue.review_details(item)["related_created"])
+                    self.assertEqual(self.state()["records"][original_id]["pending_receipt"]["identifiers"], [PERSON_ID])
+                    self.assertEqual(queue.enqueue("first", RECORD if action == "same" else changed,
+                                                   {"again"}, ["again.pdf"], resolve=True), "review")
+                    self.assertEqual(queue.pending_records(), [])
+                    queue.record_review_lookup(item, CLEAR.as_history(CONFIG))
+                    with self.assertRaisesRegex(QueueError, "confirmed person receipt"):
+                        queue.begin_review_send(item, config_destination=CONFIG.destination, reason="Checked.")
+
+    def test_pending_receipt_blocks_edit_of_original_and_related_records_without_mutation(self):
+        with RecordQueue(self.directory) as queue:
+            original = self.claimed_with_receipt(queue)
+            queue.mark_uncertain(original, "Member verification stopped.")
+            changed = {**RECORD, "phone": "12025550199"}
+            queue.enqueue("first", changed, {"changed"}, ["changed.pdf"])
+            for item in queue.review_records():
+                before = self.state()
+                with self.subTest(item=item.id), self.assertRaisesRegex(QueueError, "Verify the created person"):
+                    queue.save_review_edit(item, {**RECORD, "given_name": "Edited"})
+                self.assertEqual(self.state(), before)
+                self.assertTrue(item.path.is_file())
+            self.assertEqual(queue.pending_person_receipt(original)["identifiers"], [PERSON_ID])
+
+    def test_historical_receiptless_reconciliation_still_works_but_known_receipt_cannot_change_id(self):
+        exact = LookupResult("existing", "One exact matching person.", [{
+            "identifiers": [PERSON_ID], "matching_fields": ["email", "phone"], "differing_fields": []}])
+        for with_receipt in (False, True):
+            with self.subTest(with_receipt=with_receipt):
+                self.directory = Path(self.temporary.name) / str(with_receipt)
+                with RecordQueue(self.directory) as queue:
+                    if with_receipt:
+                        item = self.claimed_with_receipt(queue)
+                    else:
+                        item = self.held(queue)
+                        self.approve(queue, item)
+                    queue.mark_uncertain(item, "Interrupted verification.")
+                    if with_receipt:
+                        wrong = json.loads(json.dumps(exact.as_history(CONFIG)))
+                        wrong["candidates"][0]["identifiers"] = [OTHER_PERSON_ID]
+                        before = self.state()
+                        with self.assertRaisesRegex(QueueError, "saved person receipt"):
+                            queue.reconcile_sent(item, lookup=wrong, reason="Verified exact contact.")
+                        self.assertEqual(self.state(), before)
+                    else:
+                        with self.assertRaisesRegex(QueueError, "saved person receipt"):
+                            queue.finish_person_verification(item, destination=CONFIG.destination,
+                                                             identifiers=[PERSON_ID], reason="Checked.")
+                    queue.reconcile_sent(item, lookup=exact.as_history(CONFIG), reason="Verified exact contact.")
+                    self.assertIsNone(queue.pending_person_receipt(item))
+                    self.assertEqual(queue.review_details(item)["status"], "sent")
+
+    def test_version_three_history_migrates_without_inventing_person_receipts(self):
+        with RecordQueue(self.directory) as queue:
+            item = self.held(queue)
+            self.approve(queue, item)
+            queue.mark_uncertain(item, "Old interrupted attempt.")
+        state = self.state()
+        state["version"] = 3
+        (self.directory / STATE_NAME).write_text(json.dumps(state))
+        with RecordQueue(self.directory) as queue:
+            item = queue.review_records()[0]
+            self.assertIsNone(queue.pending_person_receipt(item))
+            self.assertFalse(queue.review_details(item)["related_created"])
+        self.assertEqual(self.state()["version"], 4)
+        self.assertEqual(self.state()["records"], state["records"])
+
+    def test_malformed_pending_receipt_is_rejected_before_recovery_or_moves(self):
+        mutations = [
+            lambda state, entry: state.update(version=3),
+            lambda state, entry: entry["pending_receipt"].update(token="invented"),
+            lambda state, entry: entry["pending_receipt"].update(identifiers=["action_builder:invalid"]),
+            lambda state, entry: entry["pending_receipt"].update(identifiers=[PERSON_ID, OTHER_PERSON_ID]),
+            lambda state, entry: entry["pending_receipt"]["destination"].update(campaign_id="other"),
+            lambda state, entry: entry.update(status="sent"),
+            lambda state, entry: entry.update(result={"identifiers": [PERSON_ID]}),
+        ]
+        for number, mutate in enumerate(mutations):
+            with self.subTest(number=number):
+                self.directory = Path(self.temporary.name) / f"bad-receipt-{number}"
+                with RecordQueue(self.directory) as queue:
+                    item = self.claimed_with_receipt(queue)
+                state = self.state()
+                mutate(state, state["records"][item.id])
+                (self.directory / STATE_NAME).write_text(json.dumps(state))
+                with self.assertRaises(QueueError):
+                    with RecordQueue(self.directory):
+                        pass
+                self.assertEqual(self.state(), state)
+                self.assertTrue((self.directory / "review" / item.path.name).is_file())
 
     def test_corrupt_review_decisions_are_rejected_before_deleting_anything(self):
         mutations = [

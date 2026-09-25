@@ -18,7 +18,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import requests
 from dotenv import load_dotenv
@@ -217,14 +217,31 @@ def _receipt_shape(result: Any, status_code: int) -> str:
     )
 
 
+def _confirm_uncertain_submission(payload, config, explanation):
+    """Recover proof using read-only searches, never repeat the creation POST."""
+    time.sleep(0.3)
+    try:
+        checked = ActionBuilderLookup(config).check(payload)
+    except (LookupError, requests.RequestException):
+        checked = None
+    if (checked is not None and checked.outcome == "existing"
+            and len(checked.candidates) == 1
+            and not checked.candidates[0]["differing_fields"]):
+        receipt = {"person": {"identifiers": checked.candidates[0]["identifiers"]},
+                   "confirmed_by_lookup": True}
+        return _validate_submission_receipt(receipt, 200)
+    raise SubmissionReceiptError(
+        f"{explanation} Read-only verification did not establish one exact matching person. "
+        "Keep the record held; do not send it again."
+    ) from None
+
+
 def submit_to_actionbuilder(
     payload: dict[str, Any], *, config: ActionBuilderConfig | None = None,
     member_preflight: bool = False,
+    on_person_receipt: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    """This takes in the payload(the formed payload from the approved person)
-    to then submit that data provided the .env exist with the correct
-    credentials and the connection allows the sending of the data.
-    Gives us a json file of the response that was returned from the api."""
+    """Send once, save confirmed identity, then verify configured member data."""
     # Use the same campaign and credentials for lookup and submission.
     if config is None:
         config = ActionBuilderConfig.from_environment()
@@ -234,57 +251,36 @@ def submit_to_actionbuilder(
         member_client.preflight(payload)
         time.sleep(0.3)
 
-    response = requests.post(
-        config.people_url,
-        headers=config.headers,
-        json=payload,
-        # Connect and read timeouts; this is not a total request time limit.
-        timeout=(5, 30),
-        # Keep credentials and contact data on the validated endpoint.
-        allow_redirects=False,
-    )
-
-    # Requests does not treat redirects as HTTP errors automatically.
-    if 300 <= response.status_code < 400:
-        raise RuntimeError(
-            "Action Builder returned an unexpected "
-            f"redirect: HTTP {response.status_code}"
+    receipt = None
+    try:
+        response = requests.post(
+            config.people_url, headers=config.headers, json=payload,
+            timeout=(5, 30), allow_redirects=False,
         )
-
-    response.raise_for_status()
-
-    # A successful HTTP status still needs a usable JSON receipt.
-    try:
-        result = response.json()
-    except requests.exceptions.JSONDecodeError as error:
-        raise RuntimeError(
-            "Action Builder returned a successful status "
-            "but the response was not valid JSON."
-        ) from error
-    try:
-        receipt = _validate_submission_receipt(result, response.status_code)
-    except SubmissionReceiptError as error:
-        # Never repeat the POST. A successful response with an unfamiliar body
-        # may still have created the person. Confirm the desired record with
-        # complete, fresh email AND phone searches in the same campaign.
-        if 200 <= response.status_code < 300:
-            time.sleep(0.3)
-            try:
-                checked = ActionBuilderLookup(config).check(payload)
-            except (LookupError, requests.RequestException):
-                checked = None
-            if (checked is not None and checked.outcome == "existing"
-                    and len(checked.candidates) == 1
-                    and not checked.candidates[0]["differing_fields"]):
-                receipt = {"person": {"identifiers": checked.candidates[0]["identifiers"]},
-                           "confirmed_by_lookup": True}
-                receipt = _validate_submission_receipt(receipt, response.status_code)
-            else:
-                raise SubmissionReceiptError(
-                    f"{error} Read-only verification did not establish one exact matching person."
-                ) from None
+    except requests.exceptions.SSLError:
+        raise  # A certificate problem is not a transient verification failure.
+    except (requests.Timeout, requests.ConnectionError):
+        receipt = _confirm_uncertain_submission(
+            payload, config, "The sending response was interrupted or timed out.")
+    if receipt is None:
+        # Authentication failures and redirects do not authorize recovery.
+        response.raise_for_status()
+        if not 200 <= response.status_code < 300:
+            raise SubmissionReceiptError(f"Action Builder returned an unexpected HTTP {response.status_code}. Review the outcome before retrying.")
+        try:
+            result = response.json()
+        except ValueError:
+            receipt = _confirm_uncertain_submission(
+                payload, config, "Action Builder returned a successful status but the response was not valid JSON.")
         else:
-            raise
+            try:
+                receipt = _validate_submission_receipt(result, response.status_code)
+            except SubmissionReceiptError as error:
+                receipt = _confirm_uncertain_submission(payload, config, str(error))
+    # Save validated identity before any later read can fail. Callback/storage
+    # errors stop here; they must never trigger another POST or a second callback.
+    if on_person_receipt is not None:
+        on_person_receipt(receipt)
     # A valid person receipt alone does not prove tags or assessment applied.
     member_client.next_request = time.monotonic() + .3
     member_client.verify(payload, receipt)
@@ -495,7 +491,11 @@ def send_queue(directory: Path, input_file: Path | None, submit: bool,
             queue.begin_send(item)  # Save 'sending' before the POST starts.
             try:
                 options = {"member_preflight": True} if payload.get("add_tags") else {}
-                result = submit_to_actionbuilder(payload, config=config, **options)
+                result = submit_to_actionbuilder(
+                    payload, config=config, **options,
+                    on_person_receipt=lambda receipt: queue.record_person_receipt(
+                        item, receipt, destination=config.destination),
+                )
                 queue.finish_send(item, result)
             except BaseException:
                 # Even a timeout may mean the server created the person already.

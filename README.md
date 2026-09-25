@@ -71,6 +71,10 @@ The Terminal window stays open while the app runs. Use **Close app** in the brow
 
 **Check earlier attempt** means creation may have succeeded while confirmation failed. A later lookup can find the person created by that attempt; it does not mean they existed before you submitted. Check the existing entry, including both member tags and assessment **1** when configured, then select **Mark already created** and confirm. This performs read-only checks and moves the record to Results only after verification succeeds. If it remains held, the record retains the latest failure reason and any completed contact check. Check the named field or API error before trying reconciliation again; do not submit the person again to clear the hold.
 
+**Person created · verification pending** means a valid person ID and campaign were saved before the remaining checks could finish. **Verify created person** checks that saved ID directly and verifies the configured tags and assessment, without searching for another contact match or creating anyone. Editing or creating another person is blocked while that receipt awaits verification. This status does not imply that a tag or assessment failed to save; a temporary read error can also prevent confirmation.
+
+Temporary read failures receive at most two retries, after one and two seconds. Only connection/timeouts and HTTP 429, 500, 502, 503, or 504 are retried. Successful reads add no requests, and authentication errors, invalid responses, and actual data differences remain held. Creation requests are never automatically repeated.
+
 Contact checks accept common numbered-street suffix equivalents such as **Street / St.** and **Road / Rd**, using a limited set of [USPS suffix abbreviations](https://pe.usps.com/text/pub28/28apc_002.htm). This changes comparison only; saved and submitted addresses retain their original text. House numbers, street names, directions, unit designators, and unit numbers must still match. Unsupported or ambiguous address formats remain subject to the existing strict comparison. These rules apply both to receipt recovery after sending and to **Mark already created**; both member tags and assessment must still pass verification when configured.
 
 The GUI uses the existing `composed_info` queue and history. The CLI still works, but do not run it against the same queue while a GUI operation is running. Folder or parsing issues appear in Import; a record that cannot be extracted may require correcting the PDF and importing again.
@@ -84,6 +88,8 @@ git pull --ff-only
 ```
 
 Run **Setup Windows.cmd** again if dependencies changed or the project folder moved. Setup preserves `.env`, `composed_info`, and sending history. Keep the existing installation rather than replacing it with a fresh clone that has no history.
+
+Existing queue history upgrades automatically to version 4 to retain person receipts awaiting verification. Keep using the updated app after that upgrade; older releases cannot read the new queue format. No dependency changes are needed for this recovery update.
 
 The Python workflows and local HTTP interface are tested on macOS. The Windows setup script still needs an end-to-end check on a Windows computer.
 
@@ -242,9 +248,9 @@ Pressing Enter at a confirmation means **No**; Enter at the action menu means **
 
 **Send creates the reviewed person directly after approval.** It does not return them to pending. A related record already marked sent blocks another creation. Changes edit the local contact; they do not update an existing Action Builder person. Discarding leaves source PDFs and remote records untouched.
 
-If a submission receives a successful HTTP response but an unrecognized JSON receipt, the sender now checks Action Builder again using GET requests. One exact email/phone search result with matching contact details confirms the person is present; missing, differing, ambiguous, or failed results remain held for review. The POST is never repeated by this recovery. This verifies the resulting record, not the reason the original receipt differed.
+If a submission loses its response through a timeout/connection interruption, or receives a successful HTTP response with invalid JSON or an unrecognized receipt, the sender checks Action Builder using GET requests. One exact email/phone search result with matching contact details confirms the person is present; missing, differing, ambiguous, or failed results remain held for review. Both member tags and assessment must still pass verification when configured. The POST is never repeated by this recovery. This verifies the resulting record, not the reason the original response was unavailable.
 
-For an earlier held submission you verified manually, run `review_person.py`, confirm that you checked the person, choose **r**, and confirm the fresh exact match. Do not choose Send for a person who was already created. Keep the record held if reconciliation cannot establish one exact match. The local GUI provides **Mark already created** for uncertain records.
+For an earlier held submission you verified manually, run `review_person.py`, confirm that you checked the person, choose **r**, and confirm verification. A saved receipt uses the known person ID and campaign; older attempts without a saved receipt still require one exact contact match. Do not choose Send for a person who was already created. The local GUI provides **Verify created person** when a receipt is saved, or **Mark already created** for older uncertain attempts.
 
 You can review before or after submitting the pending batch. Exit the review session before running another queue command, because the session holds the queue lock.
 
